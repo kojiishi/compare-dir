@@ -1,0 +1,13 @@
+[project]
+name = "compare-dir"
+version = "0.1.0"
+description = "Tool to compare two directories"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[project.urls]
+repository = "https://github.com/kojiishi/compare-dir"
+
+[project.scripts]
+compare-dir = "compare_dir.compare_dir:main"
