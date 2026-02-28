@@ -1,7 +1,7 @@
 [project]
 name = "compare-dir"
-version = "0.1.0"
-description = "Tool to compare two directories"
+dynamic = ["version"]
+description = "Tool to compare files in two directories"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = []
@@ -10,4 +10,11 @@ dependencies = []
 repository = "https://github.com/kojiishi/compare-dir"
 
 [project.scripts]
-compare-dir = "compare_dir.compare_dir:main"
+compare-dir = "compare_dir.directory_comparer:main"
+
+[build-system]
+requires = ["setuptools>=80", "setuptools-scm[simple]>=9.2"]
+
+[tool.setuptools_scm]
+# https://github.com/pypa/setuptools-scm
+version_file = "src/compare_dir/_version.py"

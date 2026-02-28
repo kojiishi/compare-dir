@@ -8,6 +8,8 @@ from pathlib import Path
 import time
 import sys
 
+from compare_dir import __version__
+
 class FileComparisonResult:
     """
     A class to store the comparison result for a single file.
@@ -229,8 +231,9 @@ def main():
     parser = argparse.ArgumentParser(description="Compare two directories.")
     parser.add_argument("dir1", help="Path to the first directory.")
     parser.add_argument("dir2", help="Path to the second directory.")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging to stderr.")
     parser.add_argument("-p", "--parallel", type=int, default=0, help="Number of parallel threads for file comparison. If 0, uses the default.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging to stderr.")
+    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args()
 
     dir1_path = Path(args.dir1)
