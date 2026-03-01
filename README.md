@@ -1,6 +1,7 @@
 # compare-dir
 
 Tool to compare files in two directories.
+Useful to verify backup copies.
 
 # Installation
 
@@ -20,6 +21,5 @@ compare-dir dir1 dir2
 ```
 
 For files that exist in both directories:
-* Modified time are compared.
-* Sizes are compared.
+* Modified time and sizes are compared.
 * If sizes are the same, content is compared.
