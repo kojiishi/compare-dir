@@ -205,24 +205,27 @@ class DirectoryComparer:
 
             # Try to yield from the front of the queue if the result is ready.
             # This allows us to yield results while still queuing up more work.
-            while pending_queue:
-                first_item = pending_queue[0]
-                if isinstance(first_item, concurrent.futures.Future):
-                    # If it's a future, check if it's done without blocking.
-                    if not first_item.done():
-                        # The first item in the queue is not ready, so we can't
-                        # yield it yet. Break and queue more work.
-                        break
-                    pending_queue.popleft()
-                    yield first_item.result()
-                    continue
-                assert isinstance(first_item, FileComparisonResult)
-                yield pending_queue.popleft()
+            yield from self.yield_from_queue(pending_queue, stop_at_running_task=True)
 
         # After the main loop, yield any remaining results from the queue.
-        while pending_queue:
-            item = pending_queue.popleft()
-            yield item.result() if isinstance(item, concurrent.futures.Future) else item
+        yield from self.yield_from_queue(pending_queue)
+
+    @staticmethod
+    def yield_from_queue(queue: deque, stop_at_running_task: bool = False):
+        while queue:
+            first_item = queue[0]
+            if isinstance(first_item, concurrent.futures.Future):
+                # If it's a future, check if it's done without blocking.
+                if stop_at_running_task and not first_item.done():
+                    # The first item in the queue is not ready, so we can't
+                    # yield it yet. Break and queue more work.
+                    break
+                queue.popleft()
+                yield first_item.result()
+                continue
+            assert isinstance(first_item, FileComparisonResult)
+            queue.popleft()
+            yield first_item
 
 def main():
     """
