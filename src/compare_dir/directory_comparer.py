@@ -98,15 +98,15 @@ class ComparisonSummary:
             elif result.is_content_same is False:
                 self.same_time_size_diff_content += 1
 
-    def print(self, dir1_name: str, dir2_name: str):
+    def print(self, dir1_name: str, dir2_name: str, file=sys.stdout):
         """Prints the formatted summary."""
-        print(f"Files in both: {self.in_both}")
-        print(f"Files only in {dir1_name}: {self.only_in_dir1}")
-        print(f"Files only in {dir2_name}: {self.only_in_dir2}")
-        print(f"Files in both ({dir1_name} is newer): {self.dir1_newer}")
-        print(f"Files in both ({dir2_name} is newer): {self.dir2_newer}")
-        print(f"Files in both (same time, different size): {self.same_time_diff_size}")
-        print(f"Files in both (same time and size, different content): {self.same_time_size_diff_content}")
+        print(f"Files in both: {self.in_both}", file=file)
+        print(f"Files only in {dir1_name}: {self.only_in_dir1}", file=file)
+        print(f"Files only in {dir2_name}: {self.only_in_dir2}", file=file)
+        print(f"Files in both ({dir1_name} is newer): {self.dir1_newer}", file=file)
+        print(f"Files in both ({dir2_name} is newer): {self.dir2_newer}", file=file)
+        print(f"Files in both (same time, different size): {self.same_time_diff_size}", file=file)
+        print(f"Files in both (same time and size, different content): {self.same_time_size_diff_content}", file=file)
 
 class DirectoryComparer:
     """
@@ -248,10 +248,10 @@ def main():
                             stream=sys.stderr)
 
     if not dir1_path.is_dir():
-        print(f"Error: Directory not found at '{args.dir1}'")
+        print(f"Error: Directory not found at '{args.dir1}'", file=sys.stderr)
         return
     if not dir2_path.is_dir():
-        print(f"Error: Directory not found at '{args.dir2}'")
+        print(f"Error: Directory not found at '{args.dir2}'", file=sys.stderr)
         return
 
     start_time = time.monotonic()
@@ -265,13 +265,13 @@ def main():
                 print(result.to_string(args.dir1, args.dir2))
 
         # Print the summary only if the comparison completes without interruption.
-        print("\n--- Comparison Summary ---")
-        summary.print(args.dir1, args.dir2)
+        print("\n--- Comparison Summary ---", file=sys.stderr)
+        summary.print(args.dir1, args.dir2, file=sys.stderr)
     except KeyboardInterrupt:
         # The __exit__ method of DirectoryComparer handles the shutdown.
         pass
     finally:
-        print(f"Comparison finished in {time.strftime('%H:%M:%S', time.gmtime(time.monotonic() - start_time))}.")
+        print(f"Comparison finished in {time.strftime('%H:%M:%S', time.gmtime(time.monotonic() - start_time))}.", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
