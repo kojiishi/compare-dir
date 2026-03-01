@@ -184,7 +184,7 @@ class DirectoryComparer:
 
         dir1_files = future1.result()
         dir2_files = future2.result()
-        logging.info("Scanning finished in %.2f seconds.", time.monotonic() - start_time)
+        logging.info("Scanning directories finished in %s.", time.strftime('%H:%M:%S', time.gmtime(time.monotonic() - start_time)))
 
         all_files = sorted(set(dir1_files.keys()) | set(dir2_files.keys()))
         # A deque to hold futures and pre-computed results in sorted order.
@@ -216,7 +216,7 @@ class DirectoryComparer:
             first_item = queue[0]
             if isinstance(first_item, concurrent.futures.Future):
                 # If it's a future, check if it's done without blocking.
-                if stop_at_running_task and not first_item.done():
+                if stop_at_running_task and first_item.running():
                     # The first item in the queue is not ready, so we can't
                     # yield it yet. Break and queue more work.
                     break
@@ -271,7 +271,7 @@ def main():
         # The __exit__ method of DirectoryComparer handles the shutdown.
         pass
     finally:
-        print(f"Comparison finished in {time.monotonic() - start_time:.2f} seconds.")
+        print(f"Comparison finished in {time.strftime('%H:%M:%S', time.gmtime(time.monotonic() - start_time))}.")
 
 if __name__ == "__main__":
     main()
