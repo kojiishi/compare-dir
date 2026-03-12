@@ -1,12 +1,12 @@
 use indicatif::{ProgressBar, ProgressStyle};
-use std::sync::{Arc, Mutex, mpsc};
-use std::path::{Path, PathBuf};
+use log::info;
+use rayon::prelude::*;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
-use rayon::prelude::*;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, mpsc};
 use walkdir::WalkDir;
-use std::collections::HashMap;
-use log::info;
 
 /// How a file is classified during comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,16 +99,17 @@ impl FileComparisonResult {
             }
         }
 
-        if let Some(same) = self.is_content_same {
-            if !same {
-                parts.push("Content differ".to_string());
-            }
+        if let Some(same) = self.is_content_same
+            && !same
+        {
+            parts.push("Content differ".to_string());
         }
 
         format!("{}: {}", self.relative_path.display(), parts.join(", "))
     }
 }
 
+#[derive(Default)]
 pub struct ComparisonSummary {
     pub in_both: usize,
     pub only_in_dir1: usize,
@@ -117,20 +118,6 @@ pub struct ComparisonSummary {
     pub dir2_newer: usize,
     pub same_time_diff_size: usize,
     pub same_time_size_diff_content: usize,
-}
-
-impl Default for ComparisonSummary {
-    fn default() -> Self {
-        Self {
-            in_both: 0,
-            only_in_dir1: 0,
-            only_in_dir2: 0,
-            dir1_newer: 0,
-            dir2_newer: 0,
-            same_time_diff_size: 0,
-            same_time_size_diff_content: 0,
-        }
-    }
 }
 
 impl ComparisonSummary {
@@ -159,8 +146,14 @@ impl ComparisonSummary {
         println!("Files in both: {}", self.in_both);
         println!("Files only in {}: {}", dir1_name, self.only_in_dir1);
         println!("Files only in {}: {}", dir2_name, self.only_in_dir2);
-        println!("Files in both ({} is newer): {}", dir1_name, self.dir1_newer);
-        println!("Files in both ({} is newer): {}", dir2_name, self.dir2_newer);
+        println!(
+            "Files in both ({} is newer): {}",
+            dir1_name, self.dir1_newer
+        );
+        println!(
+            "Files in both ({} is newer): {}",
+            dir2_name, self.dir2_newer
+        );
         println!(
             "Files in both (same time, different size): {}",
             self.same_time_diff_size
@@ -197,7 +190,6 @@ impl DirectoryComparer {
     /// Executes the directory comparison and prints results to stdout.
     /// This is a convenience method for CLI usage.
     pub fn run(dir1: PathBuf, dir2: PathBuf) -> anyhow::Result<()> {
-
         let pb_holder: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
 
         let start_time = std::time::Instant::now();
@@ -241,10 +233,8 @@ impl DirectoryComparer {
                     });
                 }
                 pb.inc(1);
-            } else {
-                if !result.is_identical() {
-                    println!("{}", result.to_string(dir1_str, dir2_str));
-                }
+            } else if !result.is_identical() {
+                println!("{}", result.to_string(dir1_str, dir2_str));
             }
         }
 
@@ -274,7 +264,11 @@ impl DirectoryComparer {
     /// # Arguments
     /// * `on_total` - A callback triggered with the total number of files to be compared.
     /// * `tx` - A sender to transmit `FileComparisonResult` as they are computed.
-    pub fn compare_streaming<F>(&self, on_total: F, tx: mpsc::Sender<FileComparisonResult>) -> anyhow::Result<()>
+    pub fn compare_streaming<F>(
+        &self,
+        on_total: F,
+        tx: mpsc::Sender<FileComparisonResult>,
+    ) -> anyhow::Result<()>
     where
         F: FnOnce(usize),
     {
@@ -309,7 +303,8 @@ impl DirectoryComparer {
                     FileComparisonResult::new(rel_path.clone(), Classification::OnlyInDir2)
                 }
                 (Some(p1), Some(p2)) => {
-                    let mut result = FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
+                    let mut result =
+                        FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
                     let m1 = fs::metadata(p1).ok();
                     let m2 = fs::metadata(p2).ok();
 
@@ -326,7 +321,8 @@ impl DirectoryComparer {
 
                         if s1 == s2 {
                             info!("Comparing content: {:?}", rel_path);
-                            result.is_content_same = Some(compare_contents(p1, p2).unwrap_or(false));
+                            result.is_content_same =
+                                Some(compare_contents(p1, p2).unwrap_or(false));
                         }
                     }
                     result
@@ -405,11 +401,11 @@ mod tests {
         let res2 = FileComparisonResult::new(PathBuf::from("b"), Classification::OnlyInDir2);
         let mut res3 = FileComparisonResult::new(PathBuf::from("c"), Classification::InBoth);
         res3.modified_time_comparison = Some(Comparison::Dir1Greater);
-        
+
         summary.update(&res1);
         summary.update(&res2);
         summary.update(&res3);
-        
+
         assert_eq!(summary.only_in_dir1, 1);
         assert_eq!(summary.only_in_dir2, 1);
         assert_eq!(summary.in_both, 1);
@@ -457,7 +453,7 @@ mod tests {
         while let Ok(res) = rx.recv() {
             results.push(res);
         }
-        
+
         results.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
         assert_eq!(results.len(), 4);
@@ -465,7 +461,10 @@ mod tests {
         // diff.txt
         assert_eq!(results[0].relative_path.to_str().unwrap(), "diff.txt");
         assert_eq!(results[0].classification, Classification::InBoth);
-        assert!(results[0].is_content_same == Some(false) || results[0].size_comparison != Some(Comparison::Same));
+        assert!(
+            results[0].is_content_same == Some(false)
+                || results[0].size_comparison != Some(Comparison::Same)
+        );
 
         // only1.txt
         assert_eq!(results[1].relative_path.to_str().unwrap(), "only1.txt");
