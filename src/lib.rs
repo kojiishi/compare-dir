@@ -144,15 +144,21 @@ impl ComparisonSummary {
 }
 
 /// A tool for comparing the contents of two directories.
+#[derive(Clone)]
 pub struct DirectoryComparer {
     dir1: PathBuf,
     dir2: PathBuf,
+    total_files: Arc<Mutex<usize>>,
 }
 
 impl DirectoryComparer {
     /// Creates a new `DirectoryComparer` for the two given directories.
     pub fn new(dir1: PathBuf, dir2: PathBuf) -> Self {
-        Self { dir1, dir2 }
+        Self {
+            dir1,
+            dir2,
+            total_files: Arc::new(Mutex::new(0)),
+        }
     }
 
     /// Sets the maximum number of threads for parallel processing.
@@ -168,7 +174,12 @@ impl DirectoryComparer {
     /// Executes the directory comparison and prints results to stdout.
     /// This is a convenience method for CLI usage.
     pub fn run(&self) -> anyhow::Result<()> {
-        let pb_holder: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
+        let pb = ProgressBar::new_spinner();
+        pb.enable_steady_tick(std::time::Duration::from_millis(120));
+        pb.set_style(
+            ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] {msg}").unwrap(),
+        );
+        pb.set_message("Scanning directories...");
 
         let start_time = std::time::Instant::now();
         let mut summary = ComparisonSummary::default();
@@ -176,46 +187,43 @@ impl DirectoryComparer {
         let dir2_str = self.dir2.to_str().unwrap_or("dir2");
 
         let (tx, rx) = mpsc::channel();
-        let pb_holder_c = pb_holder.clone();
+        let comparer = self.clone();
 
         std::thread::scope(|s| {
             s.spawn(move || {
-                let on_total = move |total: usize| {
-                    let pb = ProgressBar::new(total as u64);
-                    pb.set_style(
-                        ProgressStyle::with_template(
-                            "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} ({percent}%) {msg}",
-                        )
-                        .unwrap()
-                        .progress_chars("##-"),
-                    );
-                    *pb_holder_c.lock().unwrap() = Some(pb);
-                };
-
-                if let Err(e) = self.compare_streaming(on_total, tx) {
+                if let Err(e) = comparer.compare_streaming(tx) {
                     eprintln!("Error during comparison: {}", e);
                 }
             });
 
             // Receive results and update summary/UI
+            let mut length_set = false;
             while let Ok(result) = rx.recv() {
-                summary.update(&result);
-                if let Some(pb) = pb_holder.lock().unwrap().as_ref() {
-                    if !result.is_identical() {
-                        pb.suspend(|| {
-                            println!("{}", result.to_string(dir1_str, dir2_str));
-                        });
+                if !length_set {
+                    let total_files = *self.total_files.lock().unwrap();
+                    if total_files > 0 {
+                        pb.set_length(total_files as u64);
+                        pb.set_style(
+                            ProgressStyle::with_template(
+                                "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} ({percent}%) {msg}",
+                            )
+                            .unwrap(),
+                        );
+                        pb.set_message("");
+                        length_set = true;
                     }
-                    pb.inc(1);
-                } else if !result.is_identical() {
-                    println!("{}", result.to_string(dir1_str, dir2_str));
                 }
+                summary.update(&result);
+                if !result.is_identical() {
+                    pb.suspend(|| {
+                        println!("{}", result.to_string(dir1_str, dir2_str));
+                    });
+                }
+                pb.inc(1);
             }
         });
 
-        if let Some(pb) = pb_holder.lock().unwrap().as_ref() {
-            pb.finish_and_clear();
-        }
+        pb.finish_and_clear();
 
         eprintln!("\n--- Comparison Summary ---");
         summary.print(dir1_str, dir2_str);
@@ -237,16 +245,8 @@ impl DirectoryComparer {
     /// Performs the directory comparison and streams results via a channel.
     ///
     /// # Arguments
-    /// * `on_total` - A callback triggered with the total number of files to be compared.
     /// * `tx` - A sender to transmit `FileComparisonResult` as they are computed.
-    fn compare_streaming<F>(
-        &self,
-        on_total: F,
-        tx: mpsc::Sender<FileComparisonResult>,
-    ) -> anyhow::Result<()>
-    where
-        F: FnOnce(usize),
-    {
+    fn compare_streaming(&self, tx: mpsc::Sender<FileComparisonResult>) -> anyhow::Result<()> {
         let (dir1_files, dir2_files) = rayon::join(
             || {
                 info!("Scanning directory: {:?}", self.dir1);
@@ -264,7 +264,7 @@ impl DirectoryComparer {
         all_rel_paths.sort();
         all_rel_paths.dedup();
 
-        on_total(all_rel_paths.len());
+        *self.total_files.lock().unwrap() = all_rel_paths.len();
 
         all_rel_paths.into_par_iter().for_each(|rel_path| {
             let in_dir1 = dir1_files.get(rel_path);
@@ -422,7 +422,7 @@ mod tests {
         let comparer = DirectoryComparer::new(dir1.path().to_path_buf(), dir2.path().to_path_buf());
         let (tx, rx) = mpsc::channel();
 
-        comparer.compare_streaming(|_| {}, tx)?;
+        comparer.compare_streaming(tx)?;
 
         let mut results = Vec::new();
         while let Ok(res) = rx.recv() {
