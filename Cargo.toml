@@ -6,6 +6,7 @@ description = "A high-performance directory comparison tool and library"
 authors = ["Koji Ishii <kojiishi@gmail.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/kojiishi/compare-dir"
+documentation = "https://docs.rs/compare-dir/"
 readme = "README.md"
 keywords = ["directory", "comparison", "diff", "parallel"]
 categories = ["command-line-utilities", "development-tools"]
