@@ -13,6 +13,8 @@
 
 Compare two directories and show the differences.
 
+Useful to verify backup copies.
+
 ## Installation
 
 ```bash
@@ -30,8 +32,4 @@ cargo install --path .
 compare-dir <dir1> <dir2>
 ```
 
-## Examples
-
-```bash
-compare-dir dir1 dir2
-```
+Please use the `-h` option to see all options.
