@@ -184,7 +184,7 @@ impl DirectoryComparer {
                     let pb = ProgressBar::new(total as u64);
                     pb.set_style(
                         ProgressStyle::with_template(
-                            "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+                            "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} ({percent}%) {msg}",
                         )
                         .unwrap()
                         .progress_chars("##-"),
