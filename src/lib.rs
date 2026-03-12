@@ -189,54 +189,51 @@ impl DirectoryComparer {
 
     /// Executes the directory comparison and prints results to stdout.
     /// This is a convenience method for CLI usage.
-    pub fn run(dir1: PathBuf, dir2: PathBuf) -> anyhow::Result<()> {
+    pub fn run(&self) -> anyhow::Result<()> {
         let pb_holder: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
 
         let start_time = std::time::Instant::now();
         let mut summary = ComparisonSummary::default();
-        let dir1_str = dir1.to_str().unwrap_or("dir1");
-        let dir2_str = dir2.to_str().unwrap_or("dir2");
+        let dir1_str = self.dir1.to_str().unwrap_or("dir1");
+        let dir2_str = self.dir2.to_str().unwrap_or("dir2");
 
         let (tx, rx) = mpsc::channel();
-
-        // Run comparison in a separate thread or use rayon::spawn
-        let dir1_c = dir1.clone();
-        let dir2_c = dir2.clone();
         let pb_holder_c = pb_holder.clone();
 
-        std::thread::spawn(move || {
-            let comparer = Self::new(dir1_c, dir2_c);
-            let on_total = move |total: usize| {
-                let pb = ProgressBar::new(total as u64);
-                pb.set_style(
-                    ProgressStyle::with_template(
-                        "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
-                    )
-                    .unwrap()
-                    .progress_chars("##-"),
-                );
-                *pb_holder_c.lock().unwrap() = Some(pb);
-            };
+        std::thread::scope(|s| {
+            s.spawn(move || {
+                let on_total = move |total: usize| {
+                    let pb = ProgressBar::new(total as u64);
+                    pb.set_style(
+                        ProgressStyle::with_template(
+                            "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+                        )
+                        .unwrap()
+                        .progress_chars("##-"),
+                    );
+                    *pb_holder_c.lock().unwrap() = Some(pb);
+                };
 
-            if let Err(e) = comparer.compare_streaming(on_total, tx) {
-                eprintln!("Error during comparison: {}", e);
+                if let Err(e) = self.compare_streaming(on_total, tx) {
+                    eprintln!("Error during comparison: {}", e);
+                }
+            });
+
+            // Receive results and update summary/UI
+            while let Ok(result) = rx.recv() {
+                summary.update(&result);
+                if let Some(pb) = pb_holder.lock().unwrap().as_ref() {
+                    if !result.is_identical() {
+                        pb.suspend(|| {
+                            println!("{}", result.to_string(dir1_str, dir2_str));
+                        });
+                    }
+                    pb.inc(1);
+                } else if !result.is_identical() {
+                    println!("{}", result.to_string(dir1_str, dir2_str));
+                }
             }
         });
-
-        // Receive results and update summary/UI
-        while let Ok(result) = rx.recv() {
-            summary.update(&result);
-            if let Some(pb) = pb_holder.lock().unwrap().as_ref() {
-                if !result.is_identical() {
-                    pb.suspend(|| {
-                        println!("{}", result.to_string(dir1_str, dir2_str));
-                    });
-                }
-                pb.inc(1);
-            } else if !result.is_identical() {
-                println!("{}", result.to_string(dir1_str, dir2_str));
-            }
-        }
 
         if let Some(pb) = pb_holder.lock().unwrap().as_ref() {
             pb.finish_and_clear();
@@ -264,7 +261,7 @@ impl DirectoryComparer {
     /// # Arguments
     /// * `on_total` - A callback triggered with the total number of files to be compared.
     /// * `tx` - A sender to transmit `FileComparisonResult` as they are computed.
-    pub fn compare_streaming<F>(
+    fn compare_streaming<F>(
         &self,
         on_total: F,
         tx: mpsc::Sender<FileComparisonResult>,

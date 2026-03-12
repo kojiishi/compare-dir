@@ -32,5 +32,6 @@ fn main() -> anyhow::Result<()> {
     if args.parallel > 0 {
         DirectoryComparer::set_max_threads(args.parallel)?;
     }
-    DirectoryComparer::run(args.dir1, args.dir2)
+    let comparer = DirectoryComparer::new(args.dir1, args.dir2);
+    comparer.run()
 }

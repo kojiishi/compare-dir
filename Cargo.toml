@@ -1,6 +1,6 @@
 [package]
 name = "compare-dir"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 description = "A high-performance directory comparison tool and library"
 authors = ["Koji Ishii <kojiishi@gmail.com>"]
