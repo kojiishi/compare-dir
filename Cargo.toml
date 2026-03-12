@@ -1,13 +1,15 @@
 [package]
 name = "compare-dir"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "A high-performance directory comparison tool and library"
-license = "MIT"
+authors = ["Koji Ishii <kojiishi@gmail.com>"]
+license = "Apache-2.0"
 repository = "https://github.com/kojiishi/compare-dir"
 readme = "README.md"
 keywords = ["directory", "comparison", "diff", "parallel"]
 categories = ["command-line-utilities", "development-tools"]
+exclude = [".github", ".gitignore", "hooks", ".vscode"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
@@ -17,14 +19,6 @@ indicatif = "0.18"
 anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
-
-[[bin]]
-name = "compare-dir"
-path = "src/main.rs"
-
-[lib]
-name = "compare_dir"
-path = "src/lib.rs"
 
 [dev-dependencies]
 tempfile = "3.10"
