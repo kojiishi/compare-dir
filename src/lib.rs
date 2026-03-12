@@ -1,6 +1,7 @@
 use indicatif::{ProgressBar, ProgressStyle};
 use log::info;
 use rayon::prelude::*;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
@@ -19,29 +20,6 @@ pub enum Classification {
     InBoth,
 }
 
-/// The result of comparing two values (e.g., size or modified time).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Comparison {
-    /// The value in the first directory is greater.
-    Dir1Greater,
-    /// The value in the second directory is greater.
-    Dir2Greater,
-    /// The values are equal.
-    Same,
-}
-
-impl Comparison {
-    pub fn from_values<T: PartialOrd>(v1: T, v2: T) -> Self {
-        if v1 > v2 {
-            Comparison::Dir1Greater
-        } else if v2 > v1 {
-            Comparison::Dir2Greater
-        } else {
-            Comparison::Same
-        }
-    }
-}
-
 /// Detailed result of comparing a single file.
 #[derive(Debug, Clone)]
 pub struct FileComparisonResult {
@@ -50,9 +28,9 @@ pub struct FileComparisonResult {
     /// Whether the file exists in one or both directories.
     pub classification: Classification,
     /// Comparison of the last modified time, if applicable.
-    pub modified_time_comparison: Option<Comparison>,
+    pub modified_time_comparison: Option<Ordering>,
     /// Comparison of the file size, if applicable.
-    pub size_comparison: Option<Comparison>,
+    pub size_comparison: Option<Ordering>,
     /// Whether the content is byte-for-byte identical, if applicable.
     pub is_content_same: Option<bool>,
 }
@@ -70,8 +48,8 @@ impl FileComparisonResult {
 
     pub fn is_identical(&self) -> bool {
         self.classification == Classification::InBoth
-            && self.modified_time_comparison == Some(Comparison::Same)
-            && self.size_comparison == Some(Comparison::Same)
+            && self.modified_time_comparison == Some(Ordering::Equal)
+            && self.size_comparison == Some(Ordering::Equal)
             && self.is_content_same == Some(true)
     }
 
@@ -85,17 +63,17 @@ impl FileComparisonResult {
 
         if let Some(comp) = &self.modified_time_comparison {
             match comp {
-                Comparison::Dir1Greater => parts.push(format!("{} is newer", dir1_name)),
-                Comparison::Dir2Greater => parts.push(format!("{} is newer", dir2_name)),
-                Comparison::Same => {}
+                Ordering::Greater => parts.push(format!("{} is newer", dir1_name)),
+                Ordering::Less => parts.push(format!("{} is newer", dir2_name)),
+                Ordering::Equal => {}
             }
         }
 
         if let Some(comp) = &self.size_comparison {
             match comp {
-                Comparison::Dir1Greater => parts.push(format!("Size of {} is larger", dir1_name)),
-                Comparison::Dir2Greater => parts.push(format!("Size of {} is larger", dir2_name)),
-                Comparison::Same => {}
+                Ordering::Greater => parts.push(format!("Size of {} is larger", dir1_name)),
+                Ordering::Less => parts.push(format!("Size of {} is larger", dir2_name)),
+                Ordering::Equal => {}
             }
         }
 
@@ -128,10 +106,10 @@ impl ComparisonSummary {
             Classification::InBoth => {
                 self.in_both += 1;
                 match result.modified_time_comparison {
-                    Some(Comparison::Dir1Greater) => self.dir1_newer += 1,
-                    Some(Comparison::Dir2Greater) => self.dir2_newer += 1,
+                    Some(Ordering::Greater) => self.dir1_newer += 1,
+                    Some(Ordering::Less) => self.dir2_newer += 1,
                     _ => {
-                        if result.size_comparison != Some(Comparison::Same) {
+                        if result.size_comparison != Some(Ordering::Equal) {
                             self.same_time_diff_size += 1;
                         } else if result.is_content_same == Some(false) {
                             self.same_time_size_diff_content += 1;
@@ -309,12 +287,12 @@ impl DirectoryComparer {
                         let t1 = m1.modified().ok();
                         let t2 = m2.modified().ok();
                         if let (Some(t1), Some(t2)) = (t1, t2) {
-                            result.modified_time_comparison = Some(Comparison::from_values(t1, t2));
+                            result.modified_time_comparison = Some(t1.cmp(&t2));
                         }
 
                         let s1 = m1.len();
                         let s2 = m2.len();
-                        result.size_comparison = Some(Comparison::from_values(s1, s2));
+                        result.size_comparison = Some(s1.cmp(&s2));
 
                         if s1 == s2 {
                             info!("Comparing content: {:?}", rel_path);
@@ -397,7 +375,7 @@ mod tests {
         let res1 = FileComparisonResult::new(PathBuf::from("a"), Classification::OnlyInDir1);
         let res2 = FileComparisonResult::new(PathBuf::from("b"), Classification::OnlyInDir2);
         let mut res3 = FileComparisonResult::new(PathBuf::from("c"), Classification::InBoth);
-        res3.modified_time_comparison = Some(Comparison::Dir1Greater);
+        res3.modified_time_comparison = Some(Ordering::Greater);
 
         summary.update(&res1);
         summary.update(&res2);
@@ -460,7 +438,7 @@ mod tests {
         assert_eq!(results[0].classification, Classification::InBoth);
         assert!(
             results[0].is_content_same == Some(false)
-                || results[0].size_comparison != Some(Comparison::Same)
+                || results[0].size_comparison != Some(Ordering::Equal)
         );
 
         // only1.txt
@@ -474,7 +452,7 @@ mod tests {
         // same.txt
         assert_eq!(results[3].relative_path.to_str().unwrap(), "same.txt");
         assert_eq!(results[3].classification, Classification::InBoth);
-        assert_eq!(results[3].size_comparison, Some(Comparison::Same));
+        assert_eq!(results[3].size_comparison, Some(Ordering::Equal));
 
         Ok(())
     }
