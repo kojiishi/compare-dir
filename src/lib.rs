@@ -263,51 +263,102 @@ impl DirectoryComparer {
         let mut all_rel_paths: Vec<_> = dir1_files.keys().chain(dir2_files.keys()).collect();
         all_rel_paths.sort();
         all_rel_paths.dedup();
+        let total_len = all_rel_paths.len();
 
         *self.total_files.lock().unwrap() = all_rel_paths.len();
 
-        all_rel_paths.into_par_iter().for_each(|rel_path| {
-            let in_dir1 = dir1_files.get(rel_path);
-            let in_dir2 = dir2_files.get(rel_path);
+        let (tx_unordered, rx_unordered) = mpsc::channel();
 
-            let result = match (in_dir1, in_dir2) {
-                (Some(_), None) => {
-                    FileComparisonResult::new(rel_path.clone(), Classification::OnlyInDir1)
-                }
-                (None, Some(_)) => {
-                    FileComparisonResult::new(rel_path.clone(), Classification::OnlyInDir2)
-                }
-                (Some(p1), Some(p2)) => {
-                    let mut result =
-                        FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
-                    let m1 = fs::metadata(p1).ok();
-                    let m2 = fs::metadata(p2).ok();
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                self.compare_unordered_streaming(
+                    tx_unordered,
+                    all_rel_paths,
+                    &dir1_files,
+                    &dir2_files,
+                );
+            });
 
-                    if let (Some(m1), Some(m2)) = (m1, m2) {
-                        let t1 = m1.modified().ok();
-                        let t2 = m2.modified().ok();
-                        if let (Some(t1), Some(t2)) = (t1, t2) {
-                            result.modified_time_comparison = Some(t1.cmp(&t2));
-                        }
-
-                        let s1 = m1.len();
-                        let s2 = m2.len();
-                        result.size_comparison = Some(s1.cmp(&s2));
-
-                        if s1 == s2 {
-                            info!("Comparing content: {:?}", rel_path);
-                            result.is_content_same =
-                                Some(compare_contents(p1, p2).unwrap_or(false));
+            let mut buffer = HashMap::new();
+            let mut next_index = 0;
+            while next_index < total_len {
+                match rx_unordered.recv() {
+                    Ok((i, result)) => {
+                        if i == next_index {
+                            if tx.send(result).is_err() {
+                                break;
+                            }
+                            next_index += 1;
+                            while let Some(result) = buffer.remove(&next_index) {
+                                if tx.send(result).is_err() {
+                                    break;
+                                }
+                                next_index += 1;
+                            }
+                        } else {
+                            buffer.insert(i, result);
                         }
                     }
-                    result
+                    Err(_) => {
+                        break;
+                    }
                 }
-                (None, None) => unreachable!(),
-            };
-            let _ = tx.send(result);
+            }
         });
 
         Ok(())
+    }
+
+    fn compare_unordered_streaming<'a>(
+        &self,
+        tx: mpsc::Sender<(usize, FileComparisonResult)>,
+        all_rel_paths: Vec<&'a PathBuf>,
+        dir1_files: &'a HashMap<PathBuf, PathBuf>,
+        dir2_files: &'a HashMap<PathBuf, PathBuf>,
+    ) {
+        all_rel_paths
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(i, rel_path)| {
+                let in_dir1 = dir1_files.get(rel_path);
+                let in_dir2 = dir2_files.get(rel_path);
+
+                let result = match (in_dir1, in_dir2) {
+                    (Some(_), None) => {
+                        FileComparisonResult::new(rel_path.clone(), Classification::OnlyInDir1)
+                    }
+                    (None, Some(_)) => {
+                        FileComparisonResult::new(rel_path.clone(), Classification::OnlyInDir2)
+                    }
+                    (Some(p1), Some(p2)) => {
+                        let mut result =
+                            FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
+                        let m1 = fs::metadata(p1).ok();
+                        let m2 = fs::metadata(p2).ok();
+
+                        if let (Some(m1), Some(m2)) = (m1, m2) {
+                            let t1 = m1.modified().ok();
+                            let t2 = m2.modified().ok();
+                            if let (Some(t1), Some(t2)) = (t1, t2) {
+                                result.modified_time_comparison = Some(t1.cmp(&t2));
+                            }
+
+                            let s1 = m1.len();
+                            let s2 = m2.len();
+                            result.size_comparison = Some(s1.cmp(&s2));
+
+                            if s1 == s2 {
+                                info!("Comparing content: {:?}", rel_path);
+                                result.is_content_same =
+                                    Some(compare_contents(p1, p2).unwrap_or(false));
+                            }
+                        }
+                        result
+                    }
+                    (None, None) => unreachable!(),
+                };
+                let _ = tx.send((i, result));
+            });
     }
 }
 
