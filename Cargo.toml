@@ -2,6 +2,12 @@
 name = "compare-dir"
 version = "0.1.0"
 edition = "2024"
+description = "A high-performance directory comparison tool and library"
+license = "MIT"
+repository = "https://github.com/kojiishi/compare-dir"
+readme = "README.md"
+keywords = ["directory", "comparison", "diff", "parallel"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }

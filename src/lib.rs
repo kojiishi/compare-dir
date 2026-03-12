@@ -8,17 +8,25 @@ use walkdir::WalkDir;
 use std::collections::HashMap;
 use log::info;
 
+/// How a file is classified during comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Classification {
+    /// File exists only in the first directory.
     OnlyInDir1,
+    /// File exists only in the second directory.
     OnlyInDir2,
+    /// File exists in both directories.
     InBoth,
 }
 
+/// The result of comparing two values (e.g., size or modified time).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Comparison {
+    /// The value in the first directory is greater.
     Dir1Greater,
+    /// The value in the second directory is greater.
     Dir2Greater,
+    /// The values are equal.
     Same,
 }
 
@@ -34,12 +42,18 @@ impl Comparison {
     }
 }
 
+/// Detailed result of comparing a single file.
 #[derive(Debug, Clone)]
 pub struct FileComparisonResult {
+    /// The path relative to the root of the directories.
     pub relative_path: PathBuf,
+    /// Whether the file exists in one or both directories.
     pub classification: Classification,
+    /// Comparison of the last modified time, if applicable.
     pub modified_time_comparison: Option<Comparison>,
+    /// Comparison of the file size, if applicable.
     pub size_comparison: Option<Comparison>,
+    /// Whether the content is byte-for-byte identical, if applicable.
     pub is_content_same: Option<bool>,
 }
 
@@ -158,16 +172,20 @@ impl ComparisonSummary {
     }
 }
 
+/// A tool for comparing the contents of two directories.
 pub struct DirectoryComparer {
     dir1: PathBuf,
     dir2: PathBuf,
 }
 
 impl DirectoryComparer {
+    /// Creates a new `DirectoryComparer` for the two given directories.
     pub fn new(dir1: PathBuf, dir2: PathBuf) -> Self {
         Self { dir1, dir2 }
     }
 
+    /// Sets the maximum number of threads for parallel processing.
+    /// This initializes the global Rayon thread pool.
     pub fn set_max_threads(parallel: usize) -> anyhow::Result<()> {
         rayon::ThreadPoolBuilder::new()
             .num_threads(parallel)
@@ -176,6 +194,8 @@ impl DirectoryComparer {
         Ok(())
     }
 
+    /// Executes the directory comparison and prints results to stdout.
+    /// This is a convenience method for CLI usage.
     pub fn run(dir1: PathBuf, dir2: PathBuf) -> anyhow::Result<()> {
 
         let pb_holder: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
@@ -249,6 +269,11 @@ impl DirectoryComparer {
         Ok(files)
     }
 
+    /// Performs the directory comparison and streams results via a channel.
+    ///
+    /// # Arguments
+    /// * `on_total` - A callback triggered with the total number of files to be compared.
+    /// * `tx` - A sender to transmit `FileComparisonResult` as they are computed.
     pub fn compare_streaming<F>(&self, on_total: F, tx: mpsc::Sender<FileComparisonResult>) -> anyhow::Result<()>
     where
         F: FnOnce(usize),
