@@ -192,7 +192,7 @@ impl DirectoryComparer {
         std::thread::scope(|s| {
             s.spawn(move || {
                 if let Err(e) = comparer.compare_streaming(tx) {
-                    eprintln!("Error during comparison: {}", e);
+                    log::error!("Error during comparison: {}", e);
                 }
             });
 
@@ -247,46 +247,30 @@ impl DirectoryComparer {
     /// # Arguments
     /// * `tx` - A sender to transmit `FileComparisonResult` as they are computed.
     fn compare_streaming(&self, tx: mpsc::Sender<FileComparisonResult>) -> anyhow::Result<()> {
-        let (dir1_files, dir2_files) = rayon::join(
-            || {
-                info!("Scanning directory: {:?}", self.dir1);
-                Self::get_files(&self.dir1)
-            },
-            || {
-                info!("Scanning directory: {:?}", self.dir2);
-                Self::get_files(&self.dir2)
-            },
-        );
-        let dir1_files = dir1_files?;
-        let dir2_files = dir2_files?;
-
-        let mut all_rel_paths: Vec<_> = dir1_files.keys().chain(dir2_files.keys()).collect();
-        all_rel_paths.sort();
-        all_rel_paths.dedup();
-        let total_len = all_rel_paths.len();
-
-        *self.total_files.lock().unwrap() = all_rel_paths.len();
-
         let (tx_unordered, rx_unordered) = mpsc::channel();
+        let comparer = self.clone();
 
         std::thread::scope(|s| {
-            s.spawn(|| {
-                self.compare_unordered_streaming(
-                    tx_unordered,
-                    all_rel_paths,
-                    &dir1_files,
-                    &dir2_files,
-                );
+            s.spawn(move || {
+                if let Err(e) = comparer.compare_unordered_streaming(tx_unordered) {
+                    log::error!("Error during unordered comparison: {}", e);
+                }
             });
 
             let mut buffer = HashMap::new();
             let mut next_index = 0;
-            while next_index < total_len {
+            let mut total_len: Option<usize> = None;
+
+            while total_len.is_none() || next_index < total_len.unwrap() {
                 match rx_unordered.recv() {
                     Ok((i, result)) => {
+                        if total_len.is_none() {
+                            total_len = Some(*self.total_files.lock().unwrap());
+                        }
+
                         if i == next_index {
                             if tx.send(result).is_err() {
-                                break;
+                                break; // Main receiver disconnected
                             }
                             next_index += 1;
                             while let Some(result) = buffer.remove(&next_index) {
@@ -300,6 +284,7 @@ impl DirectoryComparer {
                         }
                     }
                     Err(_) => {
+                        // Channel closed, producer is done.
                         break;
                     }
                 }
@@ -309,19 +294,39 @@ impl DirectoryComparer {
         Ok(())
     }
 
-    fn compare_unordered_streaming<'a>(
+    fn compare_unordered_streaming(
         &self,
         tx: mpsc::Sender<(usize, FileComparisonResult)>,
-        all_rel_paths: Vec<&'a PathBuf>,
-        dir1_files: &'a HashMap<PathBuf, PathBuf>,
-        dir2_files: &'a HashMap<PathBuf, PathBuf>,
-    ) {
+    ) -> anyhow::Result<()> {
+        let (dir1_files, dir2_files) = rayon::join(
+            || {
+                info!("Scanning directory: {:?}", self.dir1);
+                Self::get_files(&self.dir1)
+            },
+            || {
+                info!("Scanning directory: {:?}", self.dir2);
+                Self::get_files(&self.dir2)
+            },
+        );
+        let dir1_files = dir1_files?;
+        let dir2_files = dir2_files?;
+
+        let mut all_rel_paths: Vec<_> = dir1_files
+            .keys()
+            .cloned()
+            .chain(dir2_files.keys().cloned())
+            .collect();
+        all_rel_paths.sort();
+        all_rel_paths.dedup();
+
+        *self.total_files.lock().unwrap() = all_rel_paths.len();
+
         all_rel_paths
             .into_par_iter()
             .enumerate()
             .for_each(|(i, rel_path)| {
-                let in_dir1 = dir1_files.get(rel_path);
-                let in_dir2 = dir2_files.get(rel_path);
+                let in_dir1 = dir1_files.get(&rel_path);
+                let in_dir2 = dir2_files.get(&rel_path);
 
                 let result = match (in_dir1, in_dir2) {
                     (Some(_), None) => {
@@ -357,8 +362,11 @@ impl DirectoryComparer {
                     }
                     (None, None) => unreachable!(),
                 };
-                let _ = tx.send((i, result));
+                if tx.send((i, result)).is_err() {
+                    log::error!("Receiver dropped, stopping comparison of {:?}", rel_path);
+                }
             });
+        Ok(())
     }
 }
 
