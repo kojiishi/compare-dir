@@ -46,6 +46,24 @@ impl FileComparisonResult {
         }
     }
 
+    fn update(&mut self, path1: &Path, path2: &Path) -> anyhow::Result<()> {
+        let m1 = fs::metadata(path1)?;
+        let m2 = fs::metadata(path2)?;
+        let t1 = m1.modified()?;
+        let t2 = m2.modified()?;
+        self.modified_time_comparison = Some(t1.cmp(&t2));
+
+        let s1 = m1.len();
+        let s2 = m2.len();
+        self.size_comparison = Some(s1.cmp(&s2));
+
+        if s1 == s2 {
+            log::info!("Comparing content: {:?}", self.relative_path);
+            self.is_content_same = Some(compare_contents(path1, path2)?);
+        }
+        Ok(())
+    }
+
     pub fn is_identical(&self) -> bool {
         self.classification == Classification::InBoth
             && self.modified_time_comparison == Some(Ordering::Equal)
@@ -335,28 +353,11 @@ impl DirectoryComparer {
                     (None, Some(_)) => {
                         FileComparisonResult::new(rel_path.clone(), Classification::OnlyInDir2)
                     }
-                    (Some(p1), Some(p2)) => {
+                    (Some(path1), Some(path2)) => {
                         let mut result =
                             FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
-                        let m1 = fs::metadata(p1).ok();
-                        let m2 = fs::metadata(p2).ok();
-
-                        if let (Some(m1), Some(m2)) = (m1, m2) {
-                            let t1 = m1.modified().ok();
-                            let t2 = m2.modified().ok();
-                            if let (Some(t1), Some(t2)) = (t1, t2) {
-                                result.modified_time_comparison = Some(t1.cmp(&t2));
-                            }
-
-                            let s1 = m1.len();
-                            let s2 = m2.len();
-                            result.size_comparison = Some(s1.cmp(&s2));
-
-                            if s1 == s2 {
-                                info!("Comparing content: {:?}", rel_path);
-                                result.is_content_same =
-                                    Some(compare_contents(p1, p2).unwrap_or(false));
-                            }
+                        if let Err(error) = result.update(path1, path2) {
+                            log::error!("Error during comparison of {:?}: {}", rel_path, error);
                         }
                         result
                     }
