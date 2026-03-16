@@ -46,7 +46,7 @@ impl FileComparisonResult {
         }
     }
 
-    fn update(&mut self, path1: &Path, path2: &Path) -> anyhow::Result<()> {
+    fn update(&mut self, path1: &Path, path2: &Path, buffer_size: usize) -> anyhow::Result<()> {
         let m1 = fs::metadata(path1)?;
         let m2 = fs::metadata(path2)?;
         let t1 = m1.modified()?;
@@ -59,17 +59,17 @@ impl FileComparisonResult {
 
         if s1 == s2 {
             log::info!("Comparing content: {:?}", self.relative_path);
-            self.is_content_same = Some(Self::compare_contents(path1, path2)?);
+            self.is_content_same = Some(Self::compare_contents(path1, path2, buffer_size)?);
         }
         Ok(())
     }
 
-    fn compare_contents(path1: &Path, path2: &Path) -> io::Result<bool> {
+    fn compare_contents(path1: &Path, path2: &Path, buffer_size: usize) -> io::Result<bool> {
         let mut f1 = fs::File::open(path1)?;
         let mut f2 = fs::File::open(path2)?;
 
-        let mut buf1 = [0u8; 8192];
-        let mut buf2 = [0u8; 8192];
+        let mut buf1 = vec![0u8; buffer_size];
+        let mut buf2 = vec![0u8; buffer_size];
 
         loop {
             let n1 = f1.read(&mut buf1)?;
@@ -188,6 +188,7 @@ pub struct DirectoryComparer {
     dir1: PathBuf,
     dir2: PathBuf,
     total_files: Arc<Mutex<usize>>,
+    buffer_size: usize,
 }
 
 impl DirectoryComparer {
@@ -197,7 +198,13 @@ impl DirectoryComparer {
             dir1,
             dir2,
             total_files: Arc::new(Mutex::new(0)),
+            buffer_size: 64 * 1024,
         }
+    }
+
+    /// Sets the buffer size for file comparison in bytes.
+    pub fn set_buffer_size(&mut self, size: usize) {
+        self.buffer_size = size;
     }
 
     /// Sets the maximum number of threads for parallel processing.
@@ -377,7 +384,7 @@ impl DirectoryComparer {
                     (Some(path1), Some(path2)) => {
                         let mut result =
                             FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
-                        if let Err(error) = result.update(path1, path2) {
+                        if let Err(error) = result.update(path1, path2, self.buffer_size) {
                             log::error!("Error during comparison of {:?}: {}", rel_path, error);
                         }
                         result
@@ -405,7 +412,7 @@ mod tests {
         let mut f2 = NamedTempFile::new()?;
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello world")?;
-        assert!(FileComparisonResult::compare_contents(f1.path(), f2.path())?);
+        assert!(FileComparisonResult::compare_contents(f1.path(), f2.path(), 8192)?);
         Ok(())
     }
 
@@ -415,7 +422,7 @@ mod tests {
         let mut f2 = NamedTempFile::new()?;
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello rust")?;
-        assert!(!FileComparisonResult::compare_contents(f1.path(), f2.path())?);
+        assert!(!FileComparisonResult::compare_contents(f1.path(), f2.path(), 8192)?);
         Ok(())
     }
 
@@ -426,7 +433,7 @@ mod tests {
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello")?;
         // compare_contents assumes same size, but let's see what it does
-        assert!(!FileComparisonResult::compare_contents(f1.path(), f2.path())?);
+        assert!(!FileComparisonResult::compare_contents(f1.path(), f2.path(), 8192)?);
         Ok(())
     }
 

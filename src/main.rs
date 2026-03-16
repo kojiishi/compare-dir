@@ -18,6 +18,10 @@ struct Args {
     /// Enable verbose logging to stderr.
     #[arg(short, long)]
     verbose: bool,
+
+    /// Buffer size for file comparison in KB.
+    #[arg(long, default_value_t = 64)]
+    buffer: usize,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -32,6 +36,7 @@ fn main() -> anyhow::Result<()> {
     if args.parallel > 0 {
         DirectoryComparer::set_max_threads(args.parallel)?;
     }
-    let comparer = DirectoryComparer::new(args.dir1, args.dir2);
+    let mut comparer = DirectoryComparer::new(args.dir1, args.dir2);
+    comparer.set_buffer_size(args.buffer * 1024);
     comparer.run()
 }
