@@ -59,9 +59,30 @@ impl FileComparisonResult {
 
         if s1 == s2 {
             log::info!("Comparing content: {:?}", self.relative_path);
-            self.is_content_same = Some(compare_contents(path1, path2)?);
+            self.is_content_same = Some(Self::compare_contents(path1, path2)?);
         }
         Ok(())
+    }
+
+    fn compare_contents(path1: &Path, path2: &Path) -> io::Result<bool> {
+        let mut f1 = fs::File::open(path1)?;
+        let mut f2 = fs::File::open(path2)?;
+
+        let mut buf1 = [0u8; 8192];
+        let mut buf2 = [0u8; 8192];
+
+        loop {
+            let n1 = f1.read(&mut buf1)?;
+            let n2 = f2.read(&mut buf2)?;
+
+            if n1 != n2 || buf1[..n1] != buf2[..n2] {
+                return Ok(false);
+            }
+
+            if n1 == 0 {
+                return Ok(true);
+            }
+        }
     }
 
     pub fn is_identical(&self) -> bool {
@@ -371,26 +392,6 @@ impl DirectoryComparer {
     }
 }
 
-fn compare_contents(p1: &Path, p2: &Path) -> io::Result<bool> {
-    let mut f1 = fs::File::open(p1)?;
-    let mut f2 = fs::File::open(p2)?;
-
-    let mut buf1 = [0u8; 8192];
-    let mut buf2 = [0u8; 8192];
-
-    loop {
-        let n1 = f1.read(&mut buf1)?;
-        let n2 = f2.read(&mut buf2)?;
-
-        if n1 != n2 || buf1[..n1] != buf2[..n2] {
-            return Ok(false);
-        }
-
-        if n1 == 0 {
-            return Ok(true);
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -404,7 +405,7 @@ mod tests {
         let mut f2 = NamedTempFile::new()?;
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello world")?;
-        assert!(compare_contents(f1.path(), f2.path())?);
+        assert!(FileComparisonResult::compare_contents(f1.path(), f2.path())?);
         Ok(())
     }
 
@@ -414,7 +415,7 @@ mod tests {
         let mut f2 = NamedTempFile::new()?;
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello rust")?;
-        assert!(!compare_contents(f1.path(), f2.path())?);
+        assert!(!FileComparisonResult::compare_contents(f1.path(), f2.path())?);
         Ok(())
     }
 
@@ -425,7 +426,7 @@ mod tests {
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello")?;
         // compare_contents assumes same size, but let's see what it does
-        assert!(!compare_contents(f1.path(), f2.path())?);
+        assert!(!FileComparisonResult::compare_contents(f1.path(), f2.path())?);
         Ok(())
     }
 
