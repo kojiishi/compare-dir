@@ -75,10 +75,7 @@ impl FileComparisonResult {
             // Safety from Deadlocks: rayon::join is specifically designed for nested parallelism.
             // It uses work-stealing, meaning if all threads in the pool are busy, the thread
             // calling join will just execute both tasks itself.
-            let (n1, n2) = rayon::join(
-                || f1.read(&mut buf1),
-                || f2.read(&mut buf2)
-            );
+            let (n1, n2) = rayon::join(|| f1.read(&mut buf1), || f2.read(&mut buf2));
             let n1 = n1?;
             let n2 = n2?;
 
@@ -406,7 +403,6 @@ impl DirectoryComparer {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,7 +415,11 @@ mod tests {
         let mut f2 = NamedTempFile::new()?;
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello world")?;
-        assert!(FileComparisonResult::compare_contents(f1.path(), f2.path(), 8192)?);
+        assert!(FileComparisonResult::compare_contents(
+            f1.path(),
+            f2.path(),
+            8192
+        )?);
         Ok(())
     }
 
@@ -429,7 +429,11 @@ mod tests {
         let mut f2 = NamedTempFile::new()?;
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello rust")?;
-        assert!(!FileComparisonResult::compare_contents(f1.path(), f2.path(), 8192)?);
+        assert!(!FileComparisonResult::compare_contents(
+            f1.path(),
+            f2.path(),
+            8192
+        )?);
         Ok(())
     }
 
@@ -440,7 +444,11 @@ mod tests {
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello")?;
         // compare_contents assumes same size, but let's see what it does
-        assert!(!FileComparisonResult::compare_contents(f1.path(), f2.path(), 8192)?);
+        assert!(!FileComparisonResult::compare_contents(
+            f1.path(),
+            f2.path(),
+            8192
+        )?);
         Ok(())
     }
 
