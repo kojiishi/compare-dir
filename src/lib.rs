@@ -72,8 +72,15 @@ impl FileComparisonResult {
         let mut buf2 = vec![0u8; buffer_size];
 
         loop {
-            let n1 = f1.read(&mut buf1)?;
-            let n2 = f2.read(&mut buf2)?;
+            // Safety from Deadlocks: rayon::join is specifically designed for nested parallelism.
+            // It uses work-stealing, meaning if all threads in the pool are busy, the thread
+            // calling join will just execute both tasks itself.
+            let (n1, n2) = rayon::join(
+                || f1.read(&mut buf1),
+                || f2.read(&mut buf2)
+            );
+            let n1 = n1?;
+            let n2 = n2?;
 
             if n1 != n2 || buf1[..n1] != buf2[..n2] {
                 return Ok(false);
