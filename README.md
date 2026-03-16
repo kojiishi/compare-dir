@@ -13,6 +13,7 @@
 
 Compare two directories and show the differences.
 
+It compares the file contents if the file sizes are the same.
 Useful to verify backup copies.
 
 ## Installation
@@ -20,6 +21,10 @@ Useful to verify backup copies.
 ```bash
 cargo install compare-dir
 ```
+
+See [Releases] for the change history.
+
+[Releases]: https://github.com/kojiishi/compare-dir/releases
 
 If you want to install from the local source code:
 ```bash
