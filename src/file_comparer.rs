@@ -42,6 +42,21 @@ impl<'a> FileComparer<'a> {
         let mut f1 = fs::File::open(self.path1)?;
         let mut f2 = fs::File::open(self.path2)?;
 
+        if self.buffer_size == 0 {
+            let len1 = f1.metadata()?.len();
+            let len2 = f2.metadata()?.len();
+            if len1 != len2 {
+                return Ok(false);
+            }
+            if len1 == 0 {
+                return Ok(true);
+            }
+
+            let mmap1 = unsafe { memmap2::MmapOptions::new().map(&f1)? };
+            let mmap2 = unsafe { memmap2::MmapOptions::new().map(&f2)? };
+            return Ok(mmap1[..] == mmap2[..]);
+        }
+
         let mut buf1 = vec![0u8; self.buffer_size];
         let mut buf2 = vec![0u8; self.buffer_size];
 
@@ -161,7 +176,13 @@ mod tests {
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello world")?;
         let mut comparer = FileComparer::new(f1.path(), f2.path());
+
+        // Test stream code path
         comparer.buffer_size = 8192;
+        assert!(comparer.compare_contents()?);
+
+        // Test mmap code path
+        comparer.buffer_size = 0;
         assert!(comparer.compare_contents()?);
         Ok(())
     }
@@ -173,7 +194,13 @@ mod tests {
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello rust")?;
         let mut comparer = FileComparer::new(f1.path(), f2.path());
+
+        // Test stream code path
         comparer.buffer_size = 8192;
+        assert!(!comparer.compare_contents()?);
+
+        // Test mmap code path
+        comparer.buffer_size = 0;
         assert!(!comparer.compare_contents()?);
         Ok(())
     }
@@ -184,10 +211,31 @@ mod tests {
         let mut f2 = NamedTempFile::new()?;
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello")?;
-        // compare_contents assumes same size, but let's see what it does
         let mut comparer = FileComparer::new(f1.path(), f2.path());
+
+        // Test stream code path
         comparer.buffer_size = 8192;
         assert!(!comparer.compare_contents()?);
+
+        // Test mmap code path
+        comparer.buffer_size = 0;
+        assert!(!comparer.compare_contents()?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_compare_contents_empty_files() -> io::Result<()> {
+        let f1 = NamedTempFile::new()?;
+        let f2 = NamedTempFile::new()?;
+        let mut comparer = FileComparer::new(f1.path(), f2.path());
+
+        // Test stream code path
+        comparer.buffer_size = 8192;
+        assert!(comparer.compare_contents()?);
+
+        // Test mmap code path
+        comparer.buffer_size = 0;
+        assert!(comparer.compare_contents()?);
         Ok(())
     }
 }
