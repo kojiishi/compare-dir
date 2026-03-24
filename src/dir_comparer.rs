@@ -97,12 +97,12 @@ impl DirectoryComparer {
     /// Executes the directory comparison and prints results to stdout.
     /// This is a convenience method for CLI usage.
     pub fn run(&self) -> anyhow::Result<()> {
-        let pb = ProgressBar::new_spinner();
-        pb.enable_steady_tick(std::time::Duration::from_millis(120));
-        pb.set_style(
-            ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] {msg}").unwrap(),
+        let progress = ProgressBar::new_spinner();
+        progress.enable_steady_tick(std::time::Duration::from_millis(120));
+        progress.set_style(
+            ProgressStyle::with_template("[{elapsed_precise}] {spinner:.green} {msg}").unwrap(),
         );
-        pb.set_message("Scanning directories...");
+        progress.set_message("Scanning directories...");
 
         let start_time = std::time::Instant::now();
         let mut summary = ComparisonSummary::default();
@@ -112,8 +112,8 @@ impl DirectoryComparer {
         let (tx, rx) = mpsc::channel();
         let comparer = self.clone();
 
-        std::thread::scope(|s| {
-            s.spawn(move || {
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
                 if let Err(e) = comparer.compare_streaming(tx) {
                     log::error!("Error during comparison: {}", e);
                 }
@@ -125,28 +125,28 @@ impl DirectoryComparer {
                 if !length_set {
                     let total_files = *self.total_files.lock().unwrap();
                     if total_files > 0 {
-                        pb.set_length(total_files as u64);
-                        pb.set_style(
+                        progress.set_length(total_files as u64);
+                        progress.set_style(
                             ProgressStyle::with_template(
-                                "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} ({percent}%) {msg}",
+                                "[{elapsed_precise}] {bar:40.cyan/blue} {percent}% {pos:>7}/{len:7} {msg}",
                             )
                             .unwrap(),
                         );
-                        pb.set_message("");
+                        progress.set_message("");
                         length_set = true;
                     }
                 }
                 summary.update(&result);
                 if !result.is_identical() {
-                    pb.suspend(|| {
+                    progress.suspend(|| {
                         println!("{}", result.to_string(dir1_str, dir2_str));
                     });
                 }
-                pb.inc(1);
+                progress.inc(1);
             }
         });
 
-        pb.finish_and_clear();
+        progress.finish();
 
         eprintln!("\n--- Comparison Summary ---");
         summary.print(dir1_str, dir2_str);
@@ -176,8 +176,8 @@ impl DirectoryComparer {
         let (tx_unordered, rx_unordered) = mpsc::channel();
         let comparer = self.clone();
 
-        std::thread::scope(|s| {
-            s.spawn(move || {
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
                 if let Err(e) = comparer.compare_unordered_streaming(tx_unordered) {
                     log::error!("Error during unordered comparison: {}", e);
                 }
