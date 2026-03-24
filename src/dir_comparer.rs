@@ -225,77 +225,57 @@ impl DirectoryComparer {
 
         rayon::scope(|scope| {
             loop {
-                match (&next1, &next2) {
-                    (Some((rel1, path1)), Some((rel2, path2))) => match rel1.cmp(rel2) {
-                        Ordering::Less => {
-                            let result =
-                                FileComparisonResult::new(rel1.clone(), Classification::OnlyInDir1);
-                            if tx.send((index, result)).is_err() {
-                                break;
-                            }
-                            index += 1;
-                            next1 = Self::get_next_file(&mut it1, &self.dir1);
-                        }
-                        Ordering::Greater => {
-                            let result =
-                                FileComparisonResult::new(rel2.clone(), Classification::OnlyInDir2);
-                            if tx.send((index, result)).is_err() {
-                                break;
-                            }
-                            index += 1;
-                            next2 = Self::get_next_file(&mut it2, &self.dir2);
-                        }
-                        Ordering::Equal => {
-                            let rel_path = rel1.clone();
-                            let path1_clone = path1.clone();
-                            let path2_clone = path2.clone();
-                            let mut result =
-                                FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
-                            let buffer_size = self.buffer_size;
-                            let tx_clone = tx.clone();
-                            let i = index;
-                            scope.spawn(move |_| {
-                                let mut comparer = FileComparer::new(&path1_clone, &path2_clone);
-                                comparer.buffer_size = buffer_size;
-                                if let Err(error) = result.update(&comparer) {
-                                    log::error!(
-                                        "Error during comparison of {:?}: {}",
-                                        rel_path,
-                                        error
-                                    );
-                                }
-                                if tx_clone.send((i, result)).is_err() {
-                                    log::error!(
-                                        "Receiver dropped, stopping comparison of {:?}",
-                                        rel_path
-                                    );
-                                }
-                            });
-                            index += 1;
-                            next1 = Self::get_next_file(&mut it1, &self.dir1);
-                            next2 = Self::get_next_file(&mut it2, &self.dir2);
-                        }
-                    },
-                    (Some((rel1, _)), None) => {
-                        let result =
-                            FileComparisonResult::new(rel1.clone(), Classification::OnlyInDir1);
+                let cmp = match (&next1, &next2) {
+                    (Some((rel1, _)), Some((rel2, _))) => rel1.cmp(rel2),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => break,
+                };
+
+                match cmp {
+                    Ordering::Less => {
+                        let (rel1, _) = next1.take().unwrap();
+                        let result = FileComparisonResult::new(rel1, Classification::OnlyInDir1);
                         if tx.send((index, result)).is_err() {
                             break;
                         }
                         index += 1;
                         next1 = Self::get_next_file(&mut it1, &self.dir1);
                     }
-                    (None, Some((rel2, _))) => {
-                        let result =
-                            FileComparisonResult::new(rel2.clone(), Classification::OnlyInDir2);
+                    Ordering::Greater => {
+                        let (rel2, _) = next2.take().unwrap();
+                        let result = FileComparisonResult::new(rel2, Classification::OnlyInDir2);
                         if tx.send((index, result)).is_err() {
                             break;
                         }
                         index += 1;
                         next2 = Self::get_next_file(&mut it2, &self.dir2);
                     }
-                    (None, None) => {
-                        break;
+                    Ordering::Equal => {
+                        let (rel_path, path1) = next1.take().unwrap();
+                        let (_, path2) = next2.take().unwrap();
+
+                        let mut result =
+                            FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
+                        let buffer_size = self.buffer_size;
+                        let tx_clone = tx.clone();
+                        let i = index;
+                        scope.spawn(move |_| {
+                            let mut comparer = FileComparer::new(&path1, &path2);
+                            comparer.buffer_size = buffer_size;
+                            if let Err(error) = result.update(&comparer) {
+                                log::error!("Error during comparison of {:?}: {}", rel_path, error);
+                            }
+                            if tx_clone.send((i, result)).is_err() {
+                                log::error!(
+                                    "Receiver dropped, stopping comparison of {:?}",
+                                    rel_path
+                                );
+                            }
+                        });
+                        index += 1;
+                        next1 = Self::get_next_file(&mut it1, &self.dir1);
+                        next2 = Self::get_next_file(&mut it2, &self.dir2);
                     }
                 }
             }
