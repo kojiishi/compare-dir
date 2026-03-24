@@ -4,7 +4,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::mpsc;
 use walkdir::WalkDir;
 
 #[derive(Default)]
@@ -64,11 +65,10 @@ impl ComparisonSummary {
 }
 
 /// A tool for comparing the contents of two directories.
-#[derive(Clone)]
 pub struct DirectoryComparer {
     dir1: PathBuf,
     dir2: PathBuf,
-    total_files: Arc<Mutex<usize>>,
+    total_files: AtomicUsize,
     pub buffer_size: usize,
 }
 
@@ -78,7 +78,7 @@ impl DirectoryComparer {
         Self {
             dir1,
             dir2,
-            total_files: Arc::new(Mutex::new(0)),
+            total_files: AtomicUsize::new(0),
             buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
         }
     }
@@ -109,11 +109,10 @@ impl DirectoryComparer {
         let dir2_str = self.dir2.to_str().unwrap_or("dir2");
 
         let (tx, rx) = mpsc::channel();
-        let comparer = self.clone();
 
         std::thread::scope(|scope| {
             scope.spawn(move || {
-                if let Err(e) = comparer.compare_streaming(tx) {
+                if let Err(e) = self.compare_streaming(tx) {
                     log::error!("Error during comparison: {}", e);
                 }
             });
@@ -127,7 +126,7 @@ impl DirectoryComparer {
                     progress.set_message("Comparing files...");
                 }
                 if !length_set {
-                    let total_files = *self.total_files.lock().unwrap();
+                    let total_files = self.total_files.load(AtomicOrdering::Relaxed);
                     if total_files > 0 {
                         progress.set_length(total_files as u64);
                         progress.set_style(
@@ -178,11 +177,10 @@ impl DirectoryComparer {
         tx: mpsc::Sender<FileComparisonResult>,
     ) -> anyhow::Result<()> {
         let (tx_unordered, rx_unordered) = mpsc::channel();
-        let comparer = self.clone();
 
         std::thread::scope(|scope| {
             scope.spawn(move || {
-                if let Err(e) = comparer.compare_unordered_streaming(tx_unordered) {
+                if let Err(e) = self.compare_unordered_streaming(tx_unordered) {
                     log::error!("Error during unordered comparison: {}", e);
                 }
             });
@@ -302,7 +300,7 @@ impl DirectoryComparer {
                 }
             }
 
-            *self.total_files.lock().unwrap() = index;
+            self.total_files.store(index, AtomicOrdering::Relaxed);
         });
 
         Ok(())
