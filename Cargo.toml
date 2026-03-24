@@ -1,7 +1,8 @@
 [package]
 name = "compare-dir"
-version = "0.2.5"
+version = "0.3.0"
 edition = "2024"
+rust-version = "1.88"
 description = "A high-performance directory comparison tool and library"
 authors = ["Koji Ishii <kojiishi@gmail.com>"]
 license = "Apache-2.0"

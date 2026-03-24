@@ -1,7 +1,6 @@
 use crate::file_comparer::{Classification, FileComparer, FileComparisonResult};
 use indicatif::{ProgressBar, ProgressStyle};
-use log::info;
-use rayon::prelude::*;
+
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -120,8 +119,13 @@ impl DirectoryComparer {
             });
 
             // Receive results and update summary/UI
+            let mut is_first = true;
             let mut length_set = false;
             while let Ok(result) = rx.recv() {
+                if is_first {
+                    is_first = false;
+                    progress.set_message("Comparing files...");
+                }
                 if !length_set {
                     let total_files = *self.total_files.lock().unwrap();
                     if total_files > 0 {
@@ -154,15 +158,15 @@ impl DirectoryComparer {
         Ok(())
     }
 
-    fn get_files(dir: &Path) -> anyhow::Result<HashMap<PathBuf, PathBuf>> {
-        let mut files = HashMap::new();
-        for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-            if entry.file_type().is_file() {
-                let rel_path = entry.path().strip_prefix(dir)?.to_path_buf();
-                files.insert(rel_path, entry.path().to_path_buf());
+    fn get_next_file(it: &mut walkdir::IntoIter, dir: &Path) -> Option<(PathBuf, PathBuf)> {
+        for entry in it.filter_map(|e| e.ok()) {
+            if entry.file_type().is_file()
+                && let Ok(rel_path) = entry.path().strip_prefix(dir)
+            {
+                return Some((rel_path.to_path_buf(), entry.path().to_path_buf()));
             }
         }
-        Ok(files)
+        None
     }
 
     /// Performs the directory comparison and streams results via a channel.
@@ -185,34 +189,21 @@ impl DirectoryComparer {
 
             let mut buffer = HashMap::new();
             let mut next_index = 0;
-            let mut total_len: Option<usize> = None;
 
-            while total_len.is_none() || next_index < total_len.unwrap() {
-                match rx_unordered.recv() {
-                    Ok((i, result)) => {
-                        if total_len.is_none() {
-                            total_len = Some(*self.total_files.lock().unwrap());
-                        }
-
-                        if i == next_index {
-                            if tx.send(result).is_err() {
-                                break; // Main receiver disconnected
-                            }
-                            next_index += 1;
-                            while let Some(result) = buffer.remove(&next_index) {
-                                if tx.send(result).is_err() {
-                                    break;
-                                }
-                                next_index += 1;
-                            }
-                        } else {
-                            buffer.insert(i, result);
-                        }
+            for (i, result) in rx_unordered {
+                if i == next_index {
+                    if tx.send(result).is_err() {
+                        break; // Main receiver disconnected
                     }
-                    Err(_) => {
-                        // Channel closed, producer is done.
-                        break;
+                    next_index += 1;
+                    while let Some(result) = buffer.remove(&next_index) {
+                        if tx.send(result).is_err() {
+                            break;
+                        }
+                        next_index += 1;
                     }
+                } else {
+                    buffer.insert(i, result);
                 }
             }
         });
@@ -224,59 +215,96 @@ impl DirectoryComparer {
         &self,
         tx: mpsc::Sender<(usize, FileComparisonResult)>,
     ) -> anyhow::Result<()> {
-        let (dir1_files, dir2_files) = rayon::join(
-            || {
-                info!("Scanning directory: {:?}", self.dir1);
-                Self::get_files(&self.dir1)
-            },
-            || {
-                info!("Scanning directory: {:?}", self.dir2);
-                Self::get_files(&self.dir2)
-            },
-        );
-        let dir1_files = dir1_files?;
-        let dir2_files = dir2_files?;
+        log::info!("Scanning directory: {:?}", self.dir1);
+        let mut it1 = WalkDir::new(&self.dir1).sort_by_file_name().into_iter();
+        log::info!("Scanning directory: {:?}", self.dir2);
+        let mut it2 = WalkDir::new(&self.dir2).sort_by_file_name().into_iter();
 
-        let mut all_rel_paths: Vec<_> = dir1_files
-            .keys()
-            .cloned()
-            .chain(dir2_files.keys().cloned())
-            .collect();
-        all_rel_paths.sort();
-        all_rel_paths.dedup();
+        let mut next1 = Self::get_next_file(&mut it1, &self.dir1);
+        let mut next2 = Self::get_next_file(&mut it2, &self.dir2);
 
-        *self.total_files.lock().unwrap() = all_rel_paths.len();
+        let mut index = 0;
 
-        all_rel_paths
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(i, rel_path)| {
-                let in_dir1 = dir1_files.get(&rel_path);
-                let in_dir2 = dir2_files.get(&rel_path);
-
-                let result = match (in_dir1, in_dir2) {
-                    (Some(_), None) => {
-                        FileComparisonResult::new(rel_path.clone(), Classification::OnlyInDir1)
-                    }
-                    (None, Some(_)) => {
-                        FileComparisonResult::new(rel_path.clone(), Classification::OnlyInDir2)
-                    }
-                    (Some(path1), Some(path2)) => {
-                        let mut result =
-                            FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
-                        let mut comparer = FileComparer::new(path1, path2);
-                        comparer.buffer_size = self.buffer_size;
-                        if let Err(error) = result.update(&comparer) {
-                            log::error!("Error during comparison of {:?}: {}", rel_path, error);
+        rayon::scope(|scope| {
+            loop {
+                match (&next1, &next2) {
+                    (Some((rel1, path1)), Some((rel2, path2))) => match rel1.cmp(rel2) {
+                        Ordering::Less => {
+                            let result =
+                                FileComparisonResult::new(rel1.clone(), Classification::OnlyInDir1);
+                            if tx.send((index, result)).is_err() {
+                                break;
+                            }
+                            index += 1;
+                            next1 = Self::get_next_file(&mut it1, &self.dir1);
                         }
-                        result
+                        Ordering::Greater => {
+                            let result =
+                                FileComparisonResult::new(rel2.clone(), Classification::OnlyInDir2);
+                            if tx.send((index, result)).is_err() {
+                                break;
+                            }
+                            index += 1;
+                            next2 = Self::get_next_file(&mut it2, &self.dir2);
+                        }
+                        Ordering::Equal => {
+                            let rel_path = rel1.clone();
+                            let path1_clone = path1.clone();
+                            let path2_clone = path2.clone();
+                            let mut result =
+                                FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
+                            let buffer_size = self.buffer_size;
+                            let tx_clone = tx.clone();
+                            let i = index;
+                            scope.spawn(move |_| {
+                                let mut comparer = FileComparer::new(&path1_clone, &path2_clone);
+                                comparer.buffer_size = buffer_size;
+                                if let Err(error) = result.update(&comparer) {
+                                    log::error!(
+                                        "Error during comparison of {:?}: {}",
+                                        rel_path,
+                                        error
+                                    );
+                                }
+                                if tx_clone.send((i, result)).is_err() {
+                                    log::error!(
+                                        "Receiver dropped, stopping comparison of {:?}",
+                                        rel_path
+                                    );
+                                }
+                            });
+                            index += 1;
+                            next1 = Self::get_next_file(&mut it1, &self.dir1);
+                            next2 = Self::get_next_file(&mut it2, &self.dir2);
+                        }
+                    },
+                    (Some((rel1, _)), None) => {
+                        let result =
+                            FileComparisonResult::new(rel1.clone(), Classification::OnlyInDir1);
+                        if tx.send((index, result)).is_err() {
+                            break;
+                        }
+                        index += 1;
+                        next1 = Self::get_next_file(&mut it1, &self.dir1);
                     }
-                    (None, None) => unreachable!(),
-                };
-                if tx.send((i, result)).is_err() {
-                    log::error!("Receiver dropped, stopping comparison of {:?}", rel_path);
+                    (None, Some((rel2, _))) => {
+                        let result =
+                            FileComparisonResult::new(rel2.clone(), Classification::OnlyInDir2);
+                        if tx.send((index, result)).is_err() {
+                            break;
+                        }
+                        index += 1;
+                        next2 = Self::get_next_file(&mut it2, &self.dir2);
+                    }
+                    (None, None) => {
+                        break;
+                    }
                 }
-            });
+            }
+
+            *self.total_files.lock().unwrap() = index;
+        });
+
         Ok(())
     }
 }
