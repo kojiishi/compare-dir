@@ -1,4 +1,4 @@
-use crate::file_comparer::{Classification, FileComparisonResult};
+use crate::file_comparer::{Classification, FileComparer, FileComparisonResult};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::info;
 use rayon::prelude::*;
@@ -70,7 +70,7 @@ pub struct DirectoryComparer {
     dir1: PathBuf,
     dir2: PathBuf,
     total_files: Arc<Mutex<usize>>,
-    buffer_size: usize,
+    pub buffer_size: usize,
 }
 
 impl DirectoryComparer {
@@ -80,13 +80,8 @@ impl DirectoryComparer {
             dir1,
             dir2,
             total_files: Arc::new(Mutex::new(0)),
-            buffer_size: 64 * 1024,
+            buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
         }
-    }
-
-    /// Sets the buffer size for file comparison in bytes.
-    pub fn set_buffer_size(&mut self, size: usize) {
-        self.buffer_size = size;
     }
 
     /// Sets the maximum number of threads for parallel processing.
@@ -269,7 +264,9 @@ impl DirectoryComparer {
                     (Some(path1), Some(path2)) => {
                         let mut result =
                             FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
-                        if let Err(error) = result.update(path1, path2, self.buffer_size) {
+                        let mut comparer = FileComparer::new(path1, path2);
+                        comparer.buffer_size = self.buffer_size;
+                        if let Err(error) = result.update(&comparer) {
                             log::error!("Error during comparison of {:?}: {}", rel_path, error);
                         }
                         result

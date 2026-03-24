@@ -37,6 +37,6 @@ fn main() -> anyhow::Result<()> {
         DirectoryComparer::set_max_threads(args.parallel)?;
     }
     let mut comparer = DirectoryComparer::new(args.dir1, args.dir2);
-    comparer.set_buffer_size(args.buffer * 1024);
+    comparer.buffer_size = args.buffer * 1024;
     comparer.run()
 }

@@ -14,6 +14,56 @@ pub enum Classification {
     InBoth,
 }
 
+/// Compares the content of two files.
+pub struct FileComparer<'a> {
+    path1: &'a Path,
+    path2: &'a Path,
+    pub buffer_size: usize,
+}
+
+impl<'a> FileComparer<'a> {
+    pub const DEFAULT_BUFFER_SIZE: usize = 64 * 1024;
+
+    pub fn new(path1: &'a Path, path2: &'a Path) -> Self {
+        Self {
+            path1,
+            path2,
+            buffer_size: Self::DEFAULT_BUFFER_SIZE,
+        }
+    }
+
+    pub fn metadata(&self) -> io::Result<(fs::Metadata, fs::Metadata)> {
+        let m1 = fs::metadata(self.path1)?;
+        let m2 = fs::metadata(self.path2)?;
+        Ok((m1, m2))
+    }
+
+    pub(crate) fn compare_contents(&self) -> io::Result<bool> {
+        let mut f1 = fs::File::open(self.path1)?;
+        let mut f2 = fs::File::open(self.path2)?;
+
+        let mut buf1 = vec![0u8; self.buffer_size];
+        let mut buf2 = vec![0u8; self.buffer_size];
+
+        loop {
+            // Safety from Deadlocks: rayon::join is specifically designed for nested parallelism.
+            // It uses work-stealing, meaning if all threads in the pool are busy, the thread
+            // calling join will just execute both tasks itself.
+            let (n1, n2) = rayon::join(|| f1.read(&mut buf1), || f2.read(&mut buf2));
+            let n1 = n1?;
+            let n2 = n2?;
+
+            if n1 != n2 || buf1[..n1] != buf2[..n2] {
+                return Ok(false);
+            }
+
+            if n1 == 0 {
+                return Ok(true);
+            }
+        }
+    }
+}
+
 /// Detailed result of comparing a single file.
 #[derive(Debug, Clone)]
 pub struct FileComparisonResult {
@@ -40,14 +90,8 @@ impl FileComparisonResult {
         }
     }
 
-    pub(crate) fn update(
-        &mut self,
-        path1: &Path,
-        path2: &Path,
-        buffer_size: usize,
-    ) -> anyhow::Result<()> {
-        let m1 = fs::metadata(path1)?;
-        let m2 = fs::metadata(path2)?;
+    pub(crate) fn update(&mut self, comparer: &FileComparer) -> anyhow::Result<()> {
+        let (m1, m2) = comparer.metadata()?;
         let t1 = m1.modified()?;
         let t2 = m2.modified()?;
         self.modified_time_comparison = Some(t1.cmp(&t2));
@@ -58,38 +102,9 @@ impl FileComparisonResult {
 
         if s1 == s2 {
             log::info!("Comparing content: {:?}", self.relative_path);
-            self.is_content_same = Some(Self::compare_contents(path1, path2, buffer_size)?);
+            self.is_content_same = Some(comparer.compare_contents()?);
         }
         Ok(())
-    }
-
-    pub(crate) fn compare_contents(
-        path1: &Path,
-        path2: &Path,
-        buffer_size: usize,
-    ) -> io::Result<bool> {
-        let mut f1 = fs::File::open(path1)?;
-        let mut f2 = fs::File::open(path2)?;
-
-        let mut buf1 = vec![0u8; buffer_size];
-        let mut buf2 = vec![0u8; buffer_size];
-
-        loop {
-            // Safety from Deadlocks: rayon::join is specifically designed for nested parallelism.
-            // It uses work-stealing, meaning if all threads in the pool are busy, the thread
-            // calling join will just execute both tasks itself.
-            let (n1, n2) = rayon::join(|| f1.read(&mut buf1), || f2.read(&mut buf2));
-            let n1 = n1?;
-            let n2 = n2?;
-
-            if n1 != n2 || buf1[..n1] != buf2[..n2] {
-                return Ok(false);
-            }
-
-            if n1 == 0 {
-                return Ok(true);
-            }
-        }
     }
 
     pub fn is_identical(&self) -> bool {
@@ -145,11 +160,9 @@ mod tests {
         let mut f2 = NamedTempFile::new()?;
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello world")?;
-        assert!(FileComparisonResult::compare_contents(
-            f1.path(),
-            f2.path(),
-            8192
-        )?);
+        let mut comparer = FileComparer::new(f1.path(), f2.path());
+        comparer.buffer_size = 8192;
+        assert!(comparer.compare_contents()?);
         Ok(())
     }
 
@@ -159,11 +172,9 @@ mod tests {
         let mut f2 = NamedTempFile::new()?;
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello rust")?;
-        assert!(!FileComparisonResult::compare_contents(
-            f1.path(),
-            f2.path(),
-            8192
-        )?);
+        let mut comparer = FileComparer::new(f1.path(), f2.path());
+        comparer.buffer_size = 8192;
+        assert!(!comparer.compare_contents()?);
         Ok(())
     }
 
@@ -174,11 +185,9 @@ mod tests {
         f1.write_all(b"hello world")?;
         f2.write_all(b"hello")?;
         // compare_contents assumes same size, but let's see what it does
-        assert!(!FileComparisonResult::compare_contents(
-            f1.path(),
-            f2.path(),
-            8192
-        )?);
+        let mut comparer = FileComparer::new(f1.path(), f2.path());
+        comparer.buffer_size = 8192;
+        assert!(!comparer.compare_contents()?);
         Ok(())
     }
 }
