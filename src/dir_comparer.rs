@@ -4,9 +4,15 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc;
 use walkdir::WalkDir;
+
+#[derive(Debug, Clone)]
+pub enum CompareProgress {
+    StartOfComparison,
+    TotalFiles(usize),
+    Result(usize, FileComparisonResult),
+}
 
 #[derive(Default)]
 pub struct ComparisonSummary {
@@ -68,7 +74,6 @@ impl ComparisonSummary {
 pub struct DirectoryComparer {
     dir1: PathBuf,
     dir2: PathBuf,
-    total_files: AtomicUsize,
     pub buffer_size: usize,
 }
 
@@ -78,7 +83,6 @@ impl DirectoryComparer {
         Self {
             dir1,
             dir2,
-            total_files: AtomicUsize::new(0),
             buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
         }
     }
@@ -118,16 +122,12 @@ impl DirectoryComparer {
             });
 
             // Receive results and update summary/UI
-            let mut is_first = true;
-            let mut length_set = false;
-            while let Ok(result) = rx.recv() {
-                if is_first {
-                    is_first = false;
-                    progress.set_message("Comparing files...");
-                }
-                if !length_set {
-                    let total_files = self.total_files.load(AtomicOrdering::Relaxed);
-                    if total_files > 0 {
+            while let Ok(event) = rx.recv() {
+                match event {
+                    CompareProgress::StartOfComparison => {
+                        progress.set_message("Comparing files...");
+                    }
+                    CompareProgress::TotalFiles(total_files) => {
                         progress.set_length(total_files as u64);
                         progress.set_style(
                             ProgressStyle::with_template(
@@ -136,16 +136,17 @@ impl DirectoryComparer {
                             .unwrap(),
                         );
                         progress.set_message("");
-                        length_set = true;
+                    }
+                    CompareProgress::Result(_, result) => {
+                        summary.update(&result);
+                        if !result.is_identical() {
+                            progress.suspend(|| {
+                                println!("{}", result.to_string(dir1_str, dir2_str));
+                            });
+                        }
+                        progress.inc(1);
                     }
                 }
-                summary.update(&result);
-                if !result.is_identical() {
-                    progress.suspend(|| {
-                        println!("{}", result.to_string(dir1_str, dir2_str));
-                    });
-                }
-                progress.inc(1);
             }
         });
 
@@ -174,7 +175,7 @@ impl DirectoryComparer {
     /// * `tx` - A sender to transmit `FileComparisonResult` as they are computed.
     pub(crate) fn compare_streaming(
         &self,
-        tx: mpsc::Sender<FileComparisonResult>,
+        tx: mpsc::Sender<CompareProgress>,
     ) -> anyhow::Result<()> {
         let (tx_unordered, rx_unordered) = mpsc::channel();
 
@@ -188,20 +189,25 @@ impl DirectoryComparer {
             let mut buffer = HashMap::new();
             let mut next_index = 0;
 
-            for (i, result) in rx_unordered {
-                if i == next_index {
-                    if tx.send(result).is_err() {
-                        break; // Main receiver disconnected
-                    }
-                    next_index += 1;
-                    while let Some(result) = buffer.remove(&next_index) {
-                        if tx.send(result).is_err() {
-                            break;
+            for event in rx_unordered {
+                if let CompareProgress::Result(i, _) = &event {
+                    let idx = *i;
+                    if idx == next_index {
+                        if tx.send(event).is_err() {
+                            break; // Main receiver disconnected
                         }
                         next_index += 1;
+                        while let Some(buffered) = buffer.remove(&next_index) {
+                            if tx.send(buffered).is_err() {
+                                break;
+                            }
+                            next_index += 1;
+                        }
+                    } else {
+                        buffer.insert(idx, event);
                     }
-                } else {
-                    buffer.insert(i, result);
+                } else if tx.send(event).is_err() {
+                    break;
                 }
             }
         });
@@ -209,14 +215,15 @@ impl DirectoryComparer {
         Ok(())
     }
 
-    fn compare_unordered_streaming(
-        &self,
-        tx: mpsc::Sender<(usize, FileComparisonResult)>,
-    ) -> anyhow::Result<()> {
+    fn compare_unordered_streaming(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
         log::info!("Scanning directory: {:?}", self.dir1);
         let mut it1 = WalkDir::new(&self.dir1).sort_by_file_name().into_iter();
         log::info!("Scanning directory: {:?}", self.dir2);
         let mut it2 = WalkDir::new(&self.dir2).sort_by_file_name().into_iter();
+
+        if tx.send(CompareProgress::StartOfComparison).is_err() {
+            return Ok(());
+        }
 
         let mut next1 = Self::get_next_file(&mut it1, &self.dir1);
         let mut next2 = Self::get_next_file(&mut it2, &self.dir2);
@@ -236,7 +243,7 @@ impl DirectoryComparer {
                     Ordering::Less => {
                         let (rel1, _) = next1.take().unwrap();
                         let result = FileComparisonResult::new(rel1, Classification::OnlyInDir1);
-                        if tx.send((index, result)).is_err() {
+                        if tx.send(CompareProgress::Result(index, result)).is_err() {
                             break;
                         }
                         index += 1;
@@ -245,7 +252,7 @@ impl DirectoryComparer {
                     Ordering::Greater => {
                         let (rel2, _) = next2.take().unwrap();
                         let result = FileComparisonResult::new(rel2, Classification::OnlyInDir2);
-                        if tx.send((index, result)).is_err() {
+                        if tx.send(CompareProgress::Result(index, result)).is_err() {
                             break;
                         }
                         index += 1;
@@ -266,7 +273,7 @@ impl DirectoryComparer {
                             if let Err(error) = result.update(&comparer) {
                                 log::error!("Error during comparison of {:?}: {}", rel_path, error);
                             }
-                            if tx_clone.send((i, result)).is_err() {
+                            if tx_clone.send(CompareProgress::Result(i, result)).is_err() {
                                 log::error!(
                                     "Receiver dropped, stopping comparison of {:?}",
                                     rel_path
@@ -280,7 +287,7 @@ impl DirectoryComparer {
                 }
             }
 
-            self.total_files.store(index, AtomicOrdering::Relaxed);
+            let _ = tx.send(CompareProgress::TotalFiles(index));
         });
 
         Ok(())
@@ -350,7 +357,9 @@ mod tests {
 
         let mut results = Vec::new();
         while let Ok(res) = rx.recv() {
-            results.push(res);
+            if let CompareProgress::Result(_, r) = res {
+                results.push(r);
+            }
         }
 
         results.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
