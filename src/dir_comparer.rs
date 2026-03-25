@@ -178,7 +178,6 @@ impl DirectoryComparer {
         tx: mpsc::Sender<CompareProgress>,
     ) -> anyhow::Result<()> {
         let (tx_unordered, rx_unordered) = mpsc::channel();
-
         std::thread::scope(|scope| {
             scope.spawn(move || {
                 if let Err(e) = self.compare_unordered_streaming(tx_unordered) {
@@ -191,26 +190,23 @@ impl DirectoryComparer {
 
             for event in rx_unordered {
                 if let CompareProgress::Result(i, _) = &event {
-                    let idx = *i;
-                    if idx == next_index {
-                        if tx.send(event).is_err() {
-                            break; // Main receiver disconnected
-                        }
+                    let index = *i;
+                    if index == next_index {
+                        tx.send(event)?;
                         next_index += 1;
                         while let Some(buffered) = buffer.remove(&next_index) {
-                            if tx.send(buffered).is_err() {
-                                break;
-                            }
+                            tx.send(buffered)?;
                             next_index += 1;
                         }
                     } else {
-                        buffer.insert(idx, event);
+                        buffer.insert(index, event);
                     }
-                } else if tx.send(event).is_err() {
-                    break;
+                } else {
+                    tx.send(event)?;
                 }
             }
-        });
+            Ok::<(), anyhow::Error>(())
+        })?;
 
         Ok(())
     }
@@ -220,16 +216,10 @@ impl DirectoryComparer {
         let mut it1 = WalkDir::new(&self.dir1).sort_by_file_name().into_iter();
         log::info!("Scanning directory: {:?}", self.dir2);
         let mut it2 = WalkDir::new(&self.dir2).sort_by_file_name().into_iter();
-
-        if tx.send(CompareProgress::StartOfComparison).is_err() {
-            return Ok(());
-        }
-
         let mut next1 = Self::get_next_file(&mut it1, &self.dir1);
         let mut next2 = Self::get_next_file(&mut it2, &self.dir2);
-
         let mut index = 0;
-
+        tx.send(CompareProgress::StartOfComparison)?;
         rayon::scope(|scope| {
             loop {
                 let cmp = match (&next1, &next2) {
@@ -243,18 +233,14 @@ impl DirectoryComparer {
                     Ordering::Less => {
                         let (rel1, _) = next1.take().unwrap();
                         let result = FileComparisonResult::new(rel1, Classification::OnlyInDir1);
-                        if tx.send(CompareProgress::Result(index, result)).is_err() {
-                            break;
-                        }
+                        tx.send(CompareProgress::Result(index, result))?;
                         index += 1;
                         next1 = Self::get_next_file(&mut it1, &self.dir1);
                     }
                     Ordering::Greater => {
                         let (rel2, _) = next2.take().unwrap();
                         let result = FileComparisonResult::new(rel2, Classification::OnlyInDir2);
-                        if tx.send(CompareProgress::Result(index, result)).is_err() {
-                            break;
-                        }
+                        tx.send(CompareProgress::Result(index, result))?;
                         index += 1;
                         next2 = Self::get_next_file(&mut it2, &self.dir2);
                     }
@@ -287,8 +273,8 @@ impl DirectoryComparer {
                 }
             }
 
-            let _ = tx.send(CompareProgress::TotalFiles(index));
-        });
+            tx.send(CompareProgress::TotalFiles(index))
+        })?;
 
         Ok(())
     }
