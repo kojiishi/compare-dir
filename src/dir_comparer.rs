@@ -8,14 +8,14 @@ use std::sync::mpsc;
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
-pub enum CompareProgress {
+enum CompareProgress {
     StartOfComparison,
     TotalFiles(usize),
     Result(usize, FileComparisonResult),
 }
 
 #[derive(Default)]
-pub struct ComparisonSummary {
+struct ComparisonSummary {
     pub in_both: usize,
     pub only_in_dir1: usize,
     pub only_in_dir2: usize,
@@ -173,10 +173,7 @@ impl DirectoryComparer {
     ///
     /// # Arguments
     /// * `tx` - A sender to transmit `FileComparisonResult` as they are computed.
-    pub(crate) fn compare_streaming(
-        &self,
-        tx: mpsc::Sender<CompareProgress>,
-    ) -> anyhow::Result<()> {
+    fn compare_streaming(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
         let (tx_unordered, rx_unordered) = mpsc::channel();
         std::thread::scope(|scope| {
             scope.spawn(move || {

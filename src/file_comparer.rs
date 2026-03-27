@@ -105,7 +105,7 @@ impl FileComparisonResult {
         }
     }
 
-    pub(crate) fn update(&mut self, comparer: &FileComparer) -> anyhow::Result<()> {
+    pub fn update(&mut self, comparer: &FileComparer) -> anyhow::Result<()> {
         let (m1, m2) = comparer.metadata()?;
         let t1 = m1.modified()?;
         let t2 = m2.modified()?;
