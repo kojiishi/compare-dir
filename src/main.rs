@@ -1,15 +1,15 @@
 use clap::Parser;
-use compare_dir::DirectoryComparer;
+use compare_dir::{DirectoryComparer, FileHasher};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(version, about = "Compare two directories.", long_about = None)]
+#[command(version, about = "Compare two directories or find duplicate files.", long_about = None)]
 struct Args {
-    /// Path to the first directory.
+    /// Path to the first directory (or target directory for duplication check).
     dir1: PathBuf,
 
-    /// Path to the second directory.
-    dir2: PathBuf,
+    /// Path to the second directory. If omitted, find duplicate files in dir1.
+    dir2: Option<PathBuf>,
 
     /// Number of parallel threads for file comparison. If 0, uses the default.
     #[arg(short, long, default_value_t = 0)]
@@ -36,7 +36,14 @@ fn main() -> anyhow::Result<()> {
     if args.parallel > 0 {
         DirectoryComparer::set_max_threads(args.parallel)?;
     }
-    let mut comparer = DirectoryComparer::new(args.dir1, args.dir2);
-    comparer.buffer_size = args.buffer * 1024;
-    comparer.run()
+
+    if let Some(dir2) = args.dir2 {
+        let mut comparer = DirectoryComparer::new(args.dir1, dir2);
+        comparer.buffer_size = args.buffer * 1024;
+        comparer.run()
+    } else {
+        let mut hasher = FileHasher::new(args.dir1);
+        hasher.buffer_size = args.buffer * 1024;
+        hasher.run()
+    }
 }

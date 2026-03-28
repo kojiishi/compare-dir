@@ -11,10 +11,10 @@
 
 # compare-dir
 
-Compare two directories and show the differences.
+Compare two directories and show the differences, or find duplicated files within a single directory.
 
-It compares the file contents if the file sizes are the same.
-Useful to verify backup copies.
+* For two directories, it compares the file contents if the file sizes are the same. Useful to verify backup copies.
+* For a single directory, it cryptographically hashes matching file sizes to discover exact duplicates.
 
 ## Installation
 
@@ -33,8 +33,14 @@ cargo install --path .
 
 ## Usage
 
+Compare two directories:
 ```bash
 compare-dir <dir1> <dir2>
+```
+
+Find duplicated files in a single directory:
+```bash
+compare-dir <dir>
 ```
 
 Please use the `-h` option to see all options.
