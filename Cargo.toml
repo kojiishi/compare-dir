@@ -1,6 +1,6 @@
 [package]
 name = "compare-dir"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
 description = "A high-performance directory comparison tool and library"
@@ -15,6 +15,7 @@ exclude = [".github", ".gitignore", "hooks", ".vscode"]
 
 [dependencies]
 anyhow = "1.0"
+blake3 = "1.8.3"
 clap = { version = "4.6", features = ["derive"] }
 env_logger = "0.11"
 indicatif = "0.18"
