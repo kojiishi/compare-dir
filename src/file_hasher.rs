@@ -53,13 +53,20 @@ impl FileHasher {
             for dupes in &duplicates {
                 let paths = &dupes.paths;
                 let file_size = dupes.size;
-                println!("Identical {} files of {} bytes:", paths.len(), file_size);
+                println!(
+                    "Identical {} files of {}:",
+                    paths.len(),
+                    crate::human_readable_size(file_size)
+                );
                 for path in paths {
                     println!("  {}", path.display());
                 }
                 total_wasted_space += file_size * (paths.len() as u64 - 1);
             }
-            eprintln!("Total wasted space: {} bytes", total_wasted_space);
+            eprintln!(
+                "Total wasted space: {}",
+                crate::human_readable_size(total_wasted_space)
+            );
         }
         eprintln!("Finished in {:?}.", start_time.elapsed());
         Ok(())
