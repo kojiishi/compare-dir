@@ -224,21 +224,24 @@ mod tests {
     use super::*;
     use std::io::Write;
 
+    fn create_file(path: &Path, content: &str) -> io::Result<()> {
+        let mut file = fs::File::create(path)?;
+        file.write_all(content.as_bytes())?;
+        Ok(())
+    }
+
     #[test]
     fn test_find_duplicates() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
 
         let file1_path = dir.path().join("same1.txt");
-        let mut file1 = fs::File::create(&file1_path)?;
-        file1.write_all(b"same content")?;
+        create_file(&file1_path, "same content")?;
 
         let file2_path = dir.path().join("same2.txt");
-        let mut file2 = fs::File::create(&file2_path)?;
-        file2.write_all(b"same content")?;
+        create_file(&file2_path, "same content")?;
 
         let diff_path = dir.path().join("diff.txt");
-        let mut diff = fs::File::create(&diff_path)?;
-        diff.write_all(b"different content")?;
+        create_file(&diff_path, "different content")?;
 
         let mut hasher = FileHasher::new(dir.path().to_path_buf());
         hasher.buffer_size = 8192;
