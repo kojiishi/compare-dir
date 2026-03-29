@@ -210,4 +210,33 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_find_or_new_empty_cache_file() -> anyhow::Result<()> {
+        let dir = tempdir()?;
+        let subdir = dir.path().join("subdir");
+        std::fs::create_dir(&subdir)?;
+
+        // Create an empty cache file in the parent directory
+        let cache_path = dir.path().join(FileHashCache::FILE_NAME);
+        File::create(&cache_path)?;
+
+        // Clear global caches just in case
+        {
+            let mut map = GLOBAL_CACHES.lock().unwrap();
+            map.remove(dir.path());
+            map.remove(&subdir);
+        }
+
+        // Find or new from subdir
+        let cache = FileHashCache::find_or_new(&subdir);
+
+        // It should locate the empty cache file in the parent dir
+        assert_eq!(cache.base_dir(), dir.path());
+
+        // The cache should be empty
+        assert_eq!(cache.entries.lock().unwrap().len(), 0);
+
+        Ok(())
+    }
 }
