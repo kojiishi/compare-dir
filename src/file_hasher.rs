@@ -11,7 +11,7 @@ use walkdir::WalkDir;
 pub(crate) enum HashProgress {
     StartDiscovering,
     TotalFiles(usize),
-    Result(PathBuf, u64, blake3::Hash),
+    Result(PathBuf, u64, blake3::Hash, bool),
 }
 
 enum EntryState {
@@ -77,6 +77,7 @@ impl FileHasher {
         let (tx, rx) = mpsc::channel();
         let mut by_hash: HashMap<blake3::Hash, DuplicatedFiles> = HashMap::new();
         let mut hashed_count = 0;
+        let mut cache_hits = 0;
         std::thread::scope(|scope| {
             scope.spawn(|| {
                 if let Err(e) = self.find_duplicates_internal(tx) {
@@ -99,14 +100,24 @@ impl FileHasher {
                                 .unwrap(),
                             );
                         }
-                        progress.set_message("");
+                        progress.set_message(format!(" ({} cache hits)", cache_hits));
                     }
-                    HashProgress::Result(path, size, hash) => {
+                    HashProgress::Result(path, size, hash, is_cache_hit) => {
                         hashed_count += 1;
+                        if is_cache_hit {
+                            cache_hits += 1;
+                        }
+
                         // Avoid overwriting the precise progress bar message once total length is known
                         if progress.length().is_none() {
-                            progress.set_message(format!("Hashed {} files...", hashed_count));
+                            progress.set_message(format!(
+                                "Hashed {} files ({} cache hits)...",
+                                hashed_count, cache_hits
+                            ));
+                        } else if cache_hits > 0 {
+                            progress.set_message(format!(" ({} cache hits)", cache_hits));
                         }
+
                         progress.inc(1);
                         let entry = by_hash.entry(hash).or_insert_with(|| DuplicatedFiles {
                             paths: Vec::new(),
@@ -120,6 +131,7 @@ impl FileHasher {
             }
         });
         progress.finish();
+        log::info!("Hashed {} files ({} cache hits).", hashed_count, cache_hits);
 
         let mut duplicates = Vec::new();
         for (_, mut dupes) in by_hash {
@@ -202,7 +214,7 @@ impl FileHasher {
             .strip_prefix(cache.base_dir())
             .expect("path should be in cache base_dir");
         if let Some(hash) = cache.get(relative, modified) {
-            let _ = tx.send(HashProgress::Result(path.to_path_buf(), size, hash));
+            let _ = tx.send(HashProgress::Result(path.to_path_buf(), size, hash, true));
             return;
         }
 
@@ -213,7 +225,7 @@ impl FileHasher {
         scope.spawn(move |_| {
             if let Ok(hash) = Self::compute_hash(&path_owned, self.buffer_size) {
                 cache_owned.insert(&relative_owned, modified, hash);
-                let _ = tx_owned.send(HashProgress::Result(path_owned, size, hash));
+                let _ = tx_owned.send(HashProgress::Result(path_owned, size, hash, false));
             } else {
                 log::warn!("Failed to hash file: {:?}", path_owned);
             }
