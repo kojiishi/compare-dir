@@ -1,3 +1,4 @@
+use crate::file_hash_cache::FileHashCache;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::fs;
@@ -14,7 +15,7 @@ pub(crate) enum HashProgress {
 }
 
 enum EntryState {
-    Single(PathBuf),
+    Single(PathBuf, std::time::SystemTime),
     Hashing,
 }
 
@@ -134,6 +135,7 @@ impl FileHasher {
         tx.send(HashProgress::StartDiscovering)?;
         let mut by_size: HashMap<u64, EntryState> = HashMap::new();
         let mut total_hashed = 0;
+        let cache = FileHashCache::find_or_new(&self.dir);
 
         rayon::scope(|scope| -> anyhow::Result<()> {
             for entry in WalkDir::new(&self.dir).into_iter().filter_map(|e| e.ok()) {
@@ -142,17 +144,25 @@ impl FileHasher {
                 }
                 let meta = entry.metadata()?;
                 let size = meta.len();
+                let modified = meta.modified()?;
                 // Small optimization: If file size is 0, it's not really worth treating
                 // as wasted space duplicates in the same way, but keeping it unified for now.
                 let current_path = entry.path().to_path_buf();
 
                 match by_size.entry(size) {
                     std::collections::hash_map::Entry::Occupied(mut occ) => match occ.get_mut() {
-                        EntryState::Single(first_path) => {
+                        EntryState::Single(first_path, first_modified) => {
                             // We found a second file of identical size.
                             // Time to start hashing both the *original* matching file and the *new* one!
-                            self.spawn_hash_task(scope, first_path.clone(), size, tx.clone());
-                            self.spawn_hash_task(scope, current_path.clone(), size, tx.clone());
+                            self.spawn_hash_task(
+                                scope,
+                                first_path,
+                                size,
+                                *first_modified,
+                                &tx,
+                                &cache,
+                            );
+                            self.spawn_hash_task(scope, &current_path, size, modified, &tx, &cache);
 
                             // Modify the state to indicate we are now fully hashing this size bucket.
                             *occ.get_mut() = EntryState::Hashing;
@@ -160,12 +170,12 @@ impl FileHasher {
                         }
                         EntryState::Hashing => {
                             // File size bucket already hashing; just dynamically spawn the new file immediately.
-                            self.spawn_hash_task(scope, current_path.clone(), size, tx.clone());
+                            self.spawn_hash_task(scope, &current_path, size, modified, &tx, &cache);
                             total_hashed += 1;
                         }
                     },
                     std::collections::hash_map::Entry::Vacant(vac) => {
-                        vac.insert(EntryState::Single(current_path));
+                        vac.insert(EntryState::Single(current_path, modified));
                     }
                 }
             }
@@ -175,21 +185,37 @@ impl FileHasher {
 
         // The scope waits for all spawned tasks to complete.
         // Channel `tx` gets naturally closed when it drops at the end of this function.
+        let _ = cache.save();
         Ok(())
     }
 
     fn spawn_hash_task<'scope>(
         &'scope self,
         scope: &rayon::Scope<'scope>,
-        path: PathBuf,
+        path: &Path,
         size: u64,
-        tx: mpsc::Sender<HashProgress>,
+        modified: std::time::SystemTime,
+        tx: &mpsc::Sender<HashProgress>,
+        cache: &std::sync::Arc<FileHashCache>,
     ) {
+        let relative = path
+            .strip_prefix(cache.base_dir())
+            .expect("path should be in cache base_dir");
+        if let Some(hash) = cache.get(relative, modified) {
+            let _ = tx.send(HashProgress::Result(path.to_path_buf(), size, hash));
+            return;
+        }
+
+        let path_owned = path.to_path_buf();
+        let relative_owned = relative.to_path_buf();
+        let tx_owned = tx.clone();
+        let cache_owned = cache.clone();
         scope.spawn(move |_| {
-            if let Ok(hash) = Self::compute_hash(&path, self.buffer_size) {
-                let _ = tx.send(HashProgress::Result(path, size, hash));
+            if let Ok(hash) = Self::compute_hash(&path_owned, self.buffer_size) {
+                cache_owned.insert(&relative_owned, modified, hash);
+                let _ = tx_owned.send(HashProgress::Result(path_owned, size, hash));
             } else {
-                log::warn!("Failed to hash file: {:?}", path);
+                log::warn!("Failed to hash file: {:?}", path_owned);
             }
         });
     }
@@ -214,7 +240,7 @@ impl FileHasher {
                 hasher.update(&buf[..n]);
             }
         }
-        log::debug!("Hashed in {:?}: {:?}", start_time.elapsed(), path);
+        log::trace!("Hashed in {:?}: {:?}", start_time.elapsed(), path);
         Ok(hasher.finalize())
     }
 }
