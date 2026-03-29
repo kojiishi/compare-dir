@@ -44,3 +44,23 @@ compare-dir <dir>
 ```
 
 Please use the `-h` option to see all options.
+
+# Hash Cache
+
+The file hashes are cached in a file named `.hash_cache`.
+
+If you think file contents may be changed
+without their last modified time changed,
+please remove the cache file.
+The tool will then recompute the hashes.
+
+If one of ancestor directories has the cache file,
+the nearest one is used instead.
+If you want the cache file to be in an ancestor directory,
+you can create an empty file.
+```bash
+touch ~/data/.hash_cache
+compare-dir ~/data/subdir
+```
+This will use `~/data/.hash_cache` as the cache file
+instead of creating `~/data/subdir/.hash_cache`.
