@@ -114,13 +114,18 @@ impl FileHashCache {
                         .modified
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or(Duration::ZERO);
+
+                    let rel_path_str = rel_path.to_string_lossy();
+                    #[cfg(windows)]
+                    let rel_path_str = rel_path_str.replace(std::path::MAIN_SEPARATOR, "/");
+
                     writeln!(
                         writer,
                         "{} {} {} {}",
                         entry.hash.to_hex(),
                         duration.as_secs(),
                         duration.subsec_nanos(),
-                        rel_path.to_string_lossy()
+                        rel_path_str
                     )?;
                 }
                 writer.flush()?;
@@ -163,6 +168,9 @@ impl FileHashCache {
             let Some(rel_path) = parts.next() else {
                 continue;
             };
+
+            #[cfg(windows)]
+            let rel_path = rel_path.replace('/', std::path::MAIN_SEPARATOR_STR);
 
             let Ok(hash) = Hash::from_hex(hash_hex) else {
                 continue;
