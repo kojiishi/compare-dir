@@ -126,35 +126,35 @@ impl FileHasher {
 
         rayon::scope(|scope| -> anyhow::Result<()> {
             for entry in WalkDir::new(&self.dir).into_iter().filter_map(|e| e.ok()) {
-                if entry.file_type().is_file() {
-                    let meta = entry.metadata()?;
-                    let size = meta.len();
-                    // Small optimization: If file size is 0, it's not really worth treating
-                    // as wasted space duplicates in the same way, but keeping it unified for now.
-                    let current_path = entry.path().to_path_buf();
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let meta = entry.metadata()?;
+                let size = meta.len();
+                // Small optimization: If file size is 0, it's not really worth treating
+                // as wasted space duplicates in the same way, but keeping it unified for now.
+                let current_path = entry.path().to_path_buf();
 
-                    match by_size.entry(size) {
-                        std::collections::hash_map::Entry::Occupied(mut occ) => match occ.get_mut()
-                        {
-                            EntryState::Single(first_path) => {
-                                // We found a second file of identical size.
-                                // Time to start hashing both the *original* matching file and the *new* one!
-                                self.spawn_hash_task(scope, first_path.clone(), tx.clone());
-                                self.spawn_hash_task(scope, current_path.clone(), tx.clone());
+                match by_size.entry(size) {
+                    std::collections::hash_map::Entry::Occupied(mut occ) => match occ.get_mut() {
+                        EntryState::Single(first_path) => {
+                            // We found a second file of identical size.
+                            // Time to start hashing both the *original* matching file and the *new* one!
+                            self.spawn_hash_task(scope, first_path.clone(), tx.clone());
+                            self.spawn_hash_task(scope, current_path.clone(), tx.clone());
 
-                                // Modify the state to indicate we are now fully hashing this size bucket.
-                                *occ.get_mut() = EntryState::Hashing;
-                                total_hashed += 2;
-                            }
-                            EntryState::Hashing => {
-                                // File size bucket already hashing; just dynamically spawn the new file immediately.
-                                self.spawn_hash_task(scope, current_path.clone(), tx.clone());
-                                total_hashed += 1;
-                            }
-                        },
-                        std::collections::hash_map::Entry::Vacant(vac) => {
-                            vac.insert(EntryState::Single(current_path));
+                            // Modify the state to indicate we are now fully hashing this size bucket.
+                            *occ.get_mut() = EntryState::Hashing;
+                            total_hashed += 2;
                         }
+                        EntryState::Hashing => {
+                            // File size bucket already hashing; just dynamically spawn the new file immediately.
+                            self.spawn_hash_task(scope, current_path.clone(), tx.clone());
+                            total_hashed += 1;
+                        }
+                    },
+                    std::collections::hash_map::Entry::Vacant(vac) => {
+                        vac.insert(EntryState::Single(current_path));
                     }
                 }
             }
