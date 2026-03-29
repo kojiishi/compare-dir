@@ -26,11 +26,6 @@ See [Releases] for the change history.
 
 [Releases]: https://github.com/kojiishi/compare-dir/releases
 
-If you want to install from the local source code:
-```bash
-cargo install --path .
-```
-
 ## Usage
 
 Compare two directories:
@@ -45,7 +40,7 @@ compare-dir <dir>
 
 Please use the `-h` option to see all options.
 
-# Hash Cache
+## Hash Cache
 
 The file hashes are cached in a file named `.hash_cache`.
 
@@ -56,11 +51,13 @@ The tool will then recompute the hashes.
 
 If one of ancestor directories has the cache file,
 the nearest one is used instead.
-If you want the cache file to be in an ancestor directory,
-you can create an empty file.
+You can create an empty file
+to use as the cache file at the ancestor directory.
+
+For example,
 ```bash
 touch ~/data/.hash_cache
 compare-dir ~/data/subdir
 ```
-This will use `~/data/.hash_cache` as the cache file
-instead of creating `~/data/subdir/.hash_cache`.
+Then `~/data/.hash_cache` is used as the cache file
+instead of `~/data/subdir/.hash_cache`.
