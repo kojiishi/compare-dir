@@ -178,29 +178,26 @@ impl FileHasher {
     }
 
     fn compute_hash(path: &Path, buffer_size: usize) -> io::Result<blake3::Hash> {
+        let start_time = std::time::Instant::now();
         let mut f = fs::File::open(path)?;
-
+        let mut hasher = blake3::Hasher::new();
         if buffer_size == 0 {
             let len = f.metadata()?.len();
-            if len == 0 {
-                let hasher = blake3::Hasher::new();
-                return Ok(hasher.finalize());
+            if len > 0 {
+                let mmap = unsafe { memmap2::MmapOptions::new().map(&f)? };
+                hasher.update(&mmap[..]);
             }
-            let mmap = unsafe { memmap2::MmapOptions::new().map(&f)? };
-            let mut hasher = blake3::Hasher::new();
-            hasher.update(&mmap[..]);
-            return Ok(hasher.finalize());
-        }
-
-        let mut hasher = blake3::Hasher::new();
-        let mut buf = vec![0u8; buffer_size];
-        loop {
-            let n = f.read(&mut buf)?;
-            if n == 0 {
-                break;
+        } else {
+            let mut buf = vec![0u8; buffer_size];
+            loop {
+                let n = f.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buf[..n]);
             }
-            hasher.update(&buf[..n]);
         }
+        log::debug!("Hashed in {:?}: {:?}", start_time.elapsed(), path);
         Ok(hasher.finalize())
     }
 }
