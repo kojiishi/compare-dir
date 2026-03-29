@@ -23,8 +23,8 @@ static GLOBAL_CACHES: LazyLock<Mutex<HashMap<PathBuf, Arc<FileHashCache>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 impl FileHashCache {
-    pub const FILE_NAME: &'static str = ".hashes";
-    const TMP_FILE_NAME: &'static str = ".hashes.tmp";
+    pub const FILE_NAME: &'static str = ".hash_cache";
+    const TMP_FILE_NAME: &'static str = ".hash_cache.tmp";
 
     /// Creates a new cache instance or returns an existing one for the specified directory.
     pub fn new(dir: &Path) -> Arc<Self> {
