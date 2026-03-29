@@ -86,9 +86,6 @@ impl FileHasher {
         });
         progress.finish();
 
-        eprintln!("\n--- Duplicated Files ---");
-        let mut total_wasted_space = 0;
-
         let mut duplicates = Vec::new();
         for (_, mut paths) in by_hash {
             if paths.len() > 1 {
@@ -96,23 +93,21 @@ impl FileHasher {
                 duplicates.push(paths);
             }
         }
-        duplicates.sort_by(|a, b| a[0].cmp(&b[0]));
-
-        for paths in &duplicates {
-            let first = paths.first().unwrap();
-            let file_size = fs::metadata(first)?.len();
-            println!("Identical {} files of {} bytes:", paths.len(), file_size);
-            for path in paths {
-                println!("  {}", path.display());
-            }
-            total_wasted_space += file_size * (paths.len() as u64 - 1);
-            println!();
-        }
-
         if duplicates.is_empty() {
             println!("No duplicates found.");
         } else {
-            println!("Total wasted space: {} bytes", total_wasted_space);
+            duplicates.sort_by(|a, b| a[0].cmp(&b[0]));
+            let mut total_wasted_space = 0;
+            for paths in &duplicates {
+                let first = paths.first().unwrap();
+                let file_size = fs::metadata(first)?.len();
+                println!("Identical {} files of {} bytes:", paths.len(), file_size);
+                for path in paths {
+                    println!("  {}", path.display());
+                }
+                total_wasted_space += file_size * (paths.len() as u64 - 1);
+            }
+            eprintln!("Total wasted space: {} bytes", total_wasted_space);
         }
 
         eprintln!("Finished in {:?}.", start_time.elapsed());
