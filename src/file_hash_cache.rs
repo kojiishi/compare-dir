@@ -124,7 +124,7 @@ impl FileHashCache {
         let path = self.base_dir.join(Self::FILE_NAME);
         std::fs::rename(&temp_path, &path)?;
         self.dirty.store(false, Ordering::Release);
-        log::trace!("Saved hash cache to {:?}", &path);
+        log::info!("Saved hash cache to {:?}", &path);
         Ok(())
     }
 
@@ -165,7 +165,7 @@ impl FileHashCache {
             let modified = UNIX_EPOCH + Duration::new(secs, nanos);
             entries.insert(PathBuf::from(rel_path), CacheEntry { hash, modified });
         }
-        log::trace!("Loaded hash cache from {:?}", path);
+        log::info!("Loaded hash cache from {:?}", path);
         entries
     }
 }
