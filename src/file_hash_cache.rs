@@ -99,24 +99,31 @@ impl FileHashCache {
             return Ok(());
         }
 
+        let start_time = std::time::Instant::now();
         let temp_path = self.base_dir.join(Self::TMP_FILE_NAME);
+        let num_entries;
         {
             let entries = self.entries.lock().unwrap();
             let mut file = File::create(&temp_path)?;
-            for (rel_path, entry) in entries.iter() {
-                // Format: <hash_hex> <secs> <nanos> <relative_path>
-                let duration = entry
-                    .modified
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or(Duration::ZERO);
-                writeln!(
-                    file,
-                    "{} {} {} {}",
-                    entry.hash.to_hex(),
-                    duration.as_secs(),
-                    duration.subsec_nanos(),
-                    rel_path.to_string_lossy()
-                )?;
+            num_entries = entries.len();
+            {
+                let mut writer = std::io::BufWriter::new(&mut file);
+                for (rel_path, entry) in entries.iter() {
+                    // Format: <hash_hex> <secs> <nanos> <relative_path>
+                    let duration = entry
+                        .modified
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or(Duration::ZERO);
+                    writeln!(
+                        writer,
+                        "{} {} {} {}",
+                        entry.hash.to_hex(),
+                        duration.as_secs(),
+                        duration.subsec_nanos(),
+                        rel_path.to_string_lossy()
+                    )?;
+                }
+                writer.flush()?;
             }
             file.sync_all()?;
         }
@@ -124,7 +131,12 @@ impl FileHashCache {
         let path = self.base_dir.join(Self::FILE_NAME);
         std::fs::rename(&temp_path, &path)?;
         self.dirty.store(false, Ordering::Release);
-        log::info!("Saved hash cache to {:?}", &path);
+        log::info!(
+            "Saved {} hash cache to {:?} in {:?}",
+            num_entries,
+            path,
+            start_time.elapsed()
+        );
         Ok(())
     }
 
