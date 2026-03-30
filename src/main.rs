@@ -1,6 +1,7 @@
 use clap::Parser;
 use compare_dir::{DirectoryComparer, FileHasher};
-use std::path::PathBuf;
+use std::io;
+use std::path::{self, PathBuf};
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Compare two directories or find duplicate files.", long_about = None)]
@@ -29,19 +30,21 @@ struct Args {
 }
 
 fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-
+    let mut args = Args::parse();
     if args.verbose {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     } else {
         env_logger::init();
     }
-
     if args.parallel > 0 {
         DirectoryComparer::set_max_threads(args.parallel)?;
     }
 
-    if let Some(dir2) = args.dir2 {
+    // Ensure paths are absolute. It helps when computing relative paths and
+    // walking ancestors.
+    ensure_absolute_path(&mut args.dir1)?;
+    if let Some(mut dir2) = args.dir2 {
+        ensure_absolute_path(&mut dir2)?;
         let mut comparer = DirectoryComparer::new(args.dir1, dir2);
         comparer.should_print_symbols = args.symbol;
         comparer.buffer_size = args.buffer * 1024;
@@ -51,4 +54,11 @@ fn main() -> anyhow::Result<()> {
         hasher.buffer_size = args.buffer * 1024;
         hasher.run()
     }
+}
+
+fn ensure_absolute_path(path: &mut PathBuf) -> io::Result<()> {
+    if !path.is_absolute() {
+        *path = path::absolute(&path)?;
+    }
+    Ok(())
 }
