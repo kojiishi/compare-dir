@@ -5,7 +5,7 @@ mod file_hasher;
 
 pub use dir_comparer::DirectoryComparer;
 pub use file_comparer::{Classification, FileComparer, FileComparisonResult};
-pub use file_hasher::FileHasher;
+pub use file_hasher::{DuplicatedFiles, FileHasher};
 
 pub(crate) fn human_readable_size(size: u64) -> String {
     const MB: u64 = 1024 * 1024;
