@@ -47,26 +47,36 @@ impl ComparisonSummary {
         }
     }
 
-    pub fn print(&self, dir1_name: &str, dir2_name: &str) {
-        println!("Files in both: {}", self.in_both);
-        println!("Files only in {}: {}", dir1_name, self.only_in_dir1);
-        println!("Files only in {}: {}", dir2_name, self.only_in_dir2);
-        println!(
+    pub fn print(
+        &self,
+        mut writer: impl std::io::Write,
+        dir1_name: &str,
+        dir2_name: &str,
+    ) -> std::io::Result<()> {
+        writeln!(writer, "Files in both: {}", self.in_both)?;
+        writeln!(writer, "Files only in {}: {}", dir1_name, self.only_in_dir1)?;
+        writeln!(writer, "Files only in {}: {}", dir2_name, self.only_in_dir2)?;
+        writeln!(
+            writer,
             "Files in both ({} is newer): {}",
             dir1_name, self.dir1_newer
-        );
-        println!(
+        )?;
+        writeln!(
+            writer,
             "Files in both ({} is newer): {}",
             dir2_name, self.dir2_newer
-        );
-        println!(
+        )?;
+        writeln!(
+            writer,
             "Files in both (same time, different size): {}",
             self.same_time_diff_size
-        );
-        println!(
+        )?;
+        writeln!(
+            writer,
             "Files in both (same time and size, different content): {}",
             self.same_time_size_diff_content
-        );
+        )?;
+        Ok(())
     }
 }
 
@@ -167,7 +177,7 @@ impl DirectoryComparer {
         progress.finish();
 
         eprintln!("\n--- Comparison Summary ---");
-        summary.print(dir1_str, dir2_str);
+        let _ = summary.print(&mut std::io::stderr(), dir1_str, dir2_str);
         eprintln!("Comparison finished in {:?}.", start_time.elapsed());
         Ok(())
     }
