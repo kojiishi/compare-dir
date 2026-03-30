@@ -129,6 +129,33 @@ impl FileComparisonResult {
             && self.is_content_same == Some(true)
     }
 
+    pub fn to_symbol_string(&self) -> String {
+        let c1 = match self.classification {
+            Classification::OnlyInDir1 => '>',
+            Classification::OnlyInDir2 => '<',
+            Classification::InBoth => '=',
+        };
+        let c2 = match self.modified_time_comparison {
+            None => ' ',
+            Some(Ordering::Greater) => '>',
+            Some(Ordering::Less) => '<',
+            Some(Ordering::Equal) => '=',
+        };
+        let c3 = match self.size_comparison {
+            None => ' ',
+            Some(Ordering::Greater) => '>',
+            Some(Ordering::Less) => '<',
+            Some(Ordering::Equal) => {
+                if self.is_content_same == Some(false) {
+                    '!'
+                } else {
+                    '='
+                }
+            }
+        };
+        format!("{}{}{}", c1, c2, c3)
+    }
+
     pub fn to_string(&self, dir1_name: &str, dir2_name: &str) -> String {
         let mut parts = Vec::new();
         match self.classification {
@@ -159,7 +186,11 @@ impl FileComparisonResult {
             parts.push("Content differ".to_string());
         }
 
-        format!("{}: {}", self.relative_path.display(), parts.join(", "))
+        if parts.is_empty() {
+            "Identical".to_string()
+        } else {
+            parts.join(", ")
+        }
     }
 }
 

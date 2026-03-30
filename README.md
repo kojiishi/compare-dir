@@ -40,6 +40,32 @@ compare-dir <dir>
 
 Please use the `-h` option to see all options.
 
+## Symbols
+
+When comparing two directories,
+the `--symbol` (or `-s`) option changes the output to be symbolized,
+which is easier to process for programs.
+
+| Position | Character | Meaning |
+| --- | :---: | --- |
+| 1st | `=` | Exist in both directories. |
+|| `>` | Only in `dir1`. |
+|| `<` | Only in `dir2`. |
+| 2nd | `=` | Modified time are the same. |
+|| `>` | `dir1` is newer. |
+|| `<` | `dir2` is newer. |
+| 3rd | `!` | Same file sizes but content differ. |
+|| `=` | Same file sizes and content. |
+|| `>` | `dir1` is larger. |
+|| `<` | `dir2` is larger. |
+
+For example:
+```
+=>= dir/path
+```
+means that `dir/path` in `dir1` is newer,
+but they have the same file sizes and content.
+
 ## Hash Cache
 
 The file hashes are cached in a file named `.hash_cache`.

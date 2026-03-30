@@ -74,6 +74,7 @@ impl ComparisonSummary {
 pub struct DirectoryComparer {
     dir1: PathBuf,
     dir2: PathBuf,
+    pub should_print_symbols: bool,
     pub buffer_size: usize,
 }
 
@@ -83,6 +84,7 @@ impl DirectoryComparer {
         Self {
             dir1,
             dir2,
+            should_print_symbols: false,
             buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
         }
     }
@@ -139,9 +141,21 @@ impl DirectoryComparer {
                     }
                     CompareProgress::Result(_, result) => {
                         summary.update(&result);
-                        if !result.is_identical() {
+                        if self.should_print_symbols {
                             progress.suspend(|| {
-                                println!("{}", result.to_string(dir1_str, dir2_str));
+                                println!(
+                                    "{} {}",
+                                    result.to_symbol_string(),
+                                    result.relative_path.display()
+                                );
+                            })
+                        } else if !result.is_identical() {
+                            progress.suspend(|| {
+                                println!(
+                                    "{}: {}",
+                                    result.relative_path.display(),
+                                    result.to_string(dir1_str, dir2_str)
+                                );
                             });
                         }
                         progress.inc(1);

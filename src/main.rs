@@ -15,6 +15,10 @@ struct Args {
     #[arg(short, long, default_value_t = 0)]
     parallel: usize,
 
+    /// Use symbolized output.
+    #[arg(short, long)]
+    symbol: bool,
+
     /// Enable verbose logging to stderr.
     #[arg(short, long)]
     verbose: bool,
@@ -39,6 +43,7 @@ fn main() -> anyhow::Result<()> {
 
     if let Some(dir2) = args.dir2 {
         let mut comparer = DirectoryComparer::new(args.dir1, dir2);
+        comparer.should_print_symbols = args.symbol;
         comparer.buffer_size = args.buffer * 1024;
         comparer.run()
     } else {
