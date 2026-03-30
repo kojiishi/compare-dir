@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
-pub(crate) enum HashProgress {
+enum HashProgress {
     StartDiscovering,
     TotalFiles(usize),
     Result(PathBuf, u64, blake3::Hash, bool),

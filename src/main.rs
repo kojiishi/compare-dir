@@ -42,7 +42,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(mut dir2) = args.dir2 {
         ensure_absolute_path(&mut dir2)?;
         let mut comparer = DirectoryComparer::new(args.dir1, dir2);
-        comparer.should_print_symbols = args.symbol;
+        comparer.is_symbols_format = args.symbol;
         comparer.buffer_size = args.buffer * 1024;
         comparer.run()
     } else {

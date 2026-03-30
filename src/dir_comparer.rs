@@ -84,7 +84,7 @@ impl ComparisonSummary {
 pub struct DirectoryComparer {
     dir1: PathBuf,
     dir2: PathBuf,
-    pub should_print_symbols: bool,
+    pub is_symbols_format: bool,
     pub buffer_size: usize,
 }
 
@@ -94,7 +94,7 @@ impl DirectoryComparer {
         Self {
             dir1,
             dir2,
-            should_print_symbols: false,
+            is_symbols_format: false,
             buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
         }
     }
@@ -151,7 +151,7 @@ impl DirectoryComparer {
                     }
                     CompareProgress::Result(_, result) => {
                         summary.update(&result);
-                        if self.should_print_symbols {
+                        if self.is_symbols_format {
                             progress.suspend(|| {
                                 println!(
                                     "{} {}",

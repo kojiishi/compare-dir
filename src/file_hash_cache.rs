@@ -16,7 +16,7 @@ pub struct CacheEntry {
 pub struct FileHashCache {
     base_dir: PathBuf,
     entries: Mutex<HashMap<PathBuf, CacheEntry>>,
-    dirty: AtomicBool,
+    is_dirty: AtomicBool,
 }
 
 static GLOBAL_CACHES: LazyLock<Mutex<HashMap<PathBuf, Arc<FileHashCache>>>> =
@@ -37,7 +37,7 @@ impl FileHashCache {
         let cache = Arc::new(Self {
             base_dir: dir.to_path_buf(),
             entries: Mutex::new(entries),
-            dirty: AtomicBool::new(false),
+            is_dirty: AtomicBool::new(false),
         });
         map.insert(dir.to_path_buf(), cache.clone());
         cache
@@ -90,12 +90,12 @@ impl FileHashCache {
     pub fn insert(&self, path: &Path, modified: SystemTime, hash: Hash) {
         let mut entries = self.entries.lock().unwrap();
         entries.insert(path.to_path_buf(), CacheEntry { hash, modified });
-        self.dirty.store(true, Ordering::Release);
+        self.is_dirty.store(true, Ordering::Release);
     }
 
     /// Writes the cache out to `<base_dir>/.hashes` if there are dirty changes.
     pub fn save(&self) -> io::Result<()> {
-        if !self.dirty.load(Ordering::Acquire) {
+        if !self.is_dirty.load(Ordering::Acquire) {
             return Ok(());
         }
 
@@ -135,7 +135,7 @@ impl FileHashCache {
 
         let path = self.base_dir.join(Self::FILE_NAME);
         std::fs::rename(&temp_path, &path)?;
-        self.dirty.store(false, Ordering::Release);
+        self.is_dirty.store(false, Ordering::Release);
         log::info!(
             "Saved {} hash cache to {:?} in {:?}",
             num_entries,
@@ -213,7 +213,7 @@ mod tests {
         // Ensure file exists
         assert!(dir.path().join(FileHashCache::FILE_NAME).exists());
 
-        // Create new cache instance from same dir should load data
+        // Create new cache instance from same dir should load datac
         let dir_path = dir.path().to_path_buf();
 
         // Remove from global caches so find_or_new loads from disk
