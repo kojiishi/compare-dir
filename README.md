@@ -43,19 +43,20 @@ Please use the `-h` option to see all options.
 ## Symbols
 
 When comparing two directories,
-the `--symbol` (or `-s`) option changes the output to be symbolized,
-which is easier to process for programs.
+the output is human-readable by default.
+The `--symbol` (or `-s`) option changes the output format to be symbolized,
+which is easier for programs to read.
 
 | Position | Character | Meaning |
 | --- | :---: | --- |
-| 1st | `=` | Exist in both directories. |
+| 1st | `=` | In both directories. |
 || `>` | Only in `dir1`. |
 || `<` | Only in `dir2`. |
 | 2nd | `=` | Modified time are the same. |
 || `>` | `dir1` is newer. |
 || `<` | `dir2` is newer. |
-| 3rd | `!` | Same file sizes but content differ. |
-|| `=` | Same file sizes and content. |
+| 3rd | `=` | Same file sizes and contents. |
+|| `!` | Same file sizes but contents differ. |
 || `>` | `dir1` is larger. |
 || `<` | `dir2` is larger. |
 
@@ -63,8 +64,13 @@ For example:
 ```
 =>= dir/path
 ```
-means that `dir/path` in `dir1` is newer,
-but they have the same file sizes and content.
+means that `dir/path` in `dir1` is newer than the file in `dir2`,
+but they have the same file sizes and contents.
+
+The following PowerShell example creates a list of paths of the same contents.
+```powershell
+compare-dir -s <dir1> <dir2> | sls '^..=' | %{$_ -replace '^.*? ', ''}
+```
 
 ## Hash Cache
 
@@ -77,13 +83,10 @@ The tool will then recompute the hashes.
 
 If one of ancestor directories has the cache file,
 the nearest one is used instead.
-You can create an empty file
-to use as the cache file at the ancestor directory.
-
-For example,
+For example:
 ```bash
 touch ~/data/.hash_cache
 compare-dir ~/data/subdir
 ```
-Then `~/data/.hash_cache` is used as the cache file
+Then `~/data/.hash_cache` is used as the cache file,
 instead of `~/data/subdir/.hash_cache`.
