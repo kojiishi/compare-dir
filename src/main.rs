@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use compare_dir::{DirectoryComparer, FileHasher};
 use std::io;
 use std::path::{self, PathBuf};
@@ -21,8 +21,8 @@ struct Args {
     symbol: bool,
 
     /// Enable verbose logging to stderr.
-    #[arg(short, long)]
-    verbose: bool,
+    #[arg(short, long, action = ArgAction::Count)]
+    verbose: u8,
 
     /// Buffer size for file comparison in KB.
     #[arg(long, default_value_t = 64)]
@@ -31,11 +31,7 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let mut args = Args::parse();
-    if args.verbose {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    } else {
-        env_logger::init();
-    }
+    init_logger(args.verbose);
     if args.parallel > 0 {
         DirectoryComparer::set_max_threads(args.parallel)?;
     }
@@ -54,6 +50,19 @@ fn main() -> anyhow::Result<()> {
         hasher.buffer_size = args.buffer * 1024;
         hasher.run()
     }
+}
+
+fn init_logger(verbose: u8) {
+    if verbose == 0 {
+        env_logger::init();
+        return;
+    }
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(match verbose {
+        1 => "info",
+        2 => "debug",
+        _ => "trace",
+    }))
+    .init();
 }
 
 fn ensure_absolute_path(path: &mut PathBuf) -> io::Result<()> {
