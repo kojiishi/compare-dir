@@ -109,24 +109,7 @@ impl FileHashCache {
             {
                 let mut writer = std::io::BufWriter::new(&mut file);
                 for (rel_path, entry) in entries.iter() {
-                    // Format: <hash_hex> <secs> <nanos> <relative_path>
-                    let duration = entry
-                        .modified
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or(Duration::ZERO);
-
-                    let rel_path_str = rel_path.to_string_lossy();
-                    #[cfg(windows)]
-                    let rel_path_str = rel_path_str.replace(std::path::MAIN_SEPARATOR, "/");
-
-                    writeln!(
-                        writer,
-                        "{} {} {} {}",
-                        entry.hash.to_hex(),
-                        duration.as_secs(),
-                        duration.subsec_nanos(),
-                        rel_path_str
-                    )?;
+                    Self::write_cache_entry(&mut writer, rel_path, entry)?;
                 }
                 writer.flush()?;
             }
@@ -137,7 +120,7 @@ impl FileHashCache {
         std::fs::rename(&temp_path, &path)?;
         self.is_dirty.store(false, Ordering::Release);
         log::info!(
-            "Saved {} hash cache to {:?} in {:?}",
+            "Saved {} hashes to {:?} in {:?}",
             num_entries,
             path,
             start_time.elapsed()
@@ -145,7 +128,6 @@ impl FileHashCache {
         Ok(())
     }
 
-    /// Internal function to parse the format from disk.
     fn load_cache(dir: &Path) -> HashMap<PathBuf, CacheEntry> {
         let mut entries = HashMap::new();
         let path = dir.join(Self::FILE_NAME);
@@ -155,38 +137,62 @@ impl FileHashCache {
 
         let reader = BufReader::new(file);
         for line in reader.lines().map_while(Result::ok) {
-            let mut parts = line.splitn(4, ' ');
-            let Some(hash_hex) = parts.next() else {
-                continue;
-            };
-            let Some(secs_str) = parts.next() else {
-                continue;
-            };
-            let Some(nanos_str) = parts.next() else {
-                continue;
-            };
-            let Some(rel_path) = parts.next() else {
-                continue;
-            };
-
-            #[cfg(windows)]
-            let rel_path = rel_path.replace('/', std::path::MAIN_SEPARATOR_STR);
-
-            let Ok(hash) = Hash::from_hex(hash_hex) else {
-                continue;
-            };
-            let Ok(secs) = secs_str.parse::<u64>() else {
-                continue;
-            };
-            let Ok(nanos) = nanos_str.parse::<u32>() else {
-                continue;
-            };
-
-            let modified = UNIX_EPOCH + Duration::new(secs, nanos);
-            entries.insert(PathBuf::from(rel_path), CacheEntry { hash, modified });
+            match Self::read_cache_entry(&line) {
+                Ok((path, entry)) => {
+                    entries.insert(path, entry);
+                }
+                Err(e) => {
+                    log::warn!("Failed to parse cache line {:?}: {:?}", line, e);
+                }
+            }
         }
-        log::info!("Loaded hash cache from {:?}", path);
+        log::info!("Loaded hashes from {:?}", path);
         entries
+    }
+
+    fn write_cache_entry<W: std::io::Write>(
+        writer: &mut W,
+        rel_path: &Path,
+        entry: &CacheEntry,
+    ) -> io::Result<()> {
+        let duration = entry
+            .modified
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO);
+        let rel_path_str = rel_path.to_string_lossy();
+        #[cfg(windows)]
+        let rel_path_str = rel_path_str.replace(std::path::MAIN_SEPARATOR, "/");
+        writeln!(
+            writer,
+            "{} {} {} {}",
+            entry.hash.to_hex(),
+            duration.as_secs(),
+            duration.subsec_nanos(),
+            rel_path_str
+        )
+    }
+
+    fn read_cache_entry(line: &str) -> anyhow::Result<(PathBuf, CacheEntry)> {
+        let mut parts = line.splitn(4, ' ');
+        let hash_hex = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Missing hash"))?;
+        let secs_str = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Missing secs"))?;
+        let nanos_str = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Missing nanos"))?;
+        let rel_path = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Missing path"))?;
+        #[cfg(windows)]
+        let rel_path = rel_path.replace('/', std::path::MAIN_SEPARATOR_STR);
+        let hash = Hash::from_hex(hash_hex)?;
+        let secs = secs_str.parse::<u64>()?;
+        let nanos = nanos_str.parse::<u32>()?;
+        let modified = UNIX_EPOCH + Duration::new(secs, nanos);
+        Ok((PathBuf::from(rel_path), CacheEntry { hash, modified }))
     }
 }
 
@@ -257,6 +263,68 @@ mod tests {
         // The cache should be empty
         assert_eq!(cache.entries.lock().unwrap().len(), 0);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_cache_entry_success() -> anyhow::Result<()> {
+        let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        let line = format!("{} 12345 67890 test.txt", hash_hex);
+        let (path, entry) = FileHashCache::read_cache_entry(&line)?;
+
+        assert_eq!(path, PathBuf::from("test.txt"));
+        assert_eq!(entry.hash, Hash::from_hex(hash_hex)?);
+        let expected_modified = UNIX_EPOCH + Duration::new(12345, 67890);
+        assert_eq!(entry.modified, expected_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_cache_entry_spaces_in_path() -> anyhow::Result<()> {
+        let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        let line = format!("{} 12345 67890 path with spaces.txt", hash_hex);
+        let (path, entry) = FileHashCache::read_cache_entry(&line)?;
+
+        assert_eq!(path, PathBuf::from("path with spaces.txt"));
+        assert_eq!(entry.hash, Hash::from_hex(hash_hex)?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_cache_entry_failures() {
+        // Missing fields
+        assert!(FileHashCache::read_cache_entry("").is_err());
+        assert!(FileHashCache::read_cache_entry("hash").is_err());
+        assert!(FileHashCache::read_cache_entry("hash 123").is_err());
+        assert!(FileHashCache::read_cache_entry("hash 123 456").is_err());
+
+        // Invalid hash
+        assert!(FileHashCache::read_cache_entry("invalid_hex 123 456 path.txt").is_err());
+
+        // Invalid numbers
+        let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        assert!(
+            FileHashCache::read_cache_entry(&format!("{} abc 456 path.txt", hash_hex)).is_err()
+        );
+        assert!(
+            FileHashCache::read_cache_entry(&format!("{} 123 def path.txt", hash_hex)).is_err()
+        );
+    }
+
+    #[test]
+    fn test_write_cache_entry() -> anyhow::Result<()> {
+        let mut buf = Vec::new();
+        let path = Path::new("test.txt");
+        let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        let hash = Hash::from_hex(hash_hex)?;
+        let modified = UNIX_EPOCH + Duration::new(12345, 67890);
+        let entry = CacheEntry { hash, modified };
+
+        FileHashCache::write_cache_entry(&mut buf, path, &entry)?;
+
+        let output = String::from_utf8(buf)?;
+        let expected = format!("{} 12345 67890 test.txt\n", hash_hex);
+        assert_eq!(output, expected);
         Ok(())
     }
 }
