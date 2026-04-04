@@ -277,7 +277,6 @@ impl DirectoryComparer {
                     (None, Some(_)) => Ordering::Greater,
                     (None, None) => break,
                 };
-
                 match cmp {
                     Ordering::Less => {
                         let (rel1, _) = next1.take().unwrap();
@@ -330,6 +329,11 @@ impl DirectoryComparer {
             tx.send(CompareProgress::TotalFiles(index))
         })?;
 
+        if let Some((h1, h2)) = hashers {
+            let (r1, r2) = rayon::join(|| h1.save_cache(), || h2.save_cache());
+            r1?;
+            r2?;
+        }
         Ok(())
     }
 }
