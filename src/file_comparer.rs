@@ -130,7 +130,7 @@ impl FileComparisonResult {
         self.size_comparison = Some(s1.cmp(&s2));
 
         if should_compare_content && s1 == s2 {
-            log::info!("Comparing content: {:?}", self.relative_path);
+            log::trace!("Comparing content: {:?}", self.relative_path);
             self.is_content_same = Some(comparer.compare_contents()?);
         }
         Ok(())

@@ -87,6 +87,8 @@ pub enum FileComparisonMethod {
     Size,
     /// Compare by hash (BLAKE3).
     Hash,
+    /// Compare by hash, without using the cached hashes.
+    Rehash,
     /// Compare byte-by-byte.
     Full,
 }
@@ -253,11 +255,16 @@ impl DirectoryComparer {
         let mut next1 = Self::get_next_file(&mut it1, &self.dir1);
         let mut next2 = Self::get_next_file(&mut it2, &self.dir2);
         let mut index = 0;
-        let hashers = if self.comparison_method == FileComparisonMethod::Hash {
-            Some((
-                crate::FileHasher::new(self.dir1.clone()),
-                crate::FileHasher::new(self.dir2.clone()),
-            ))
+        let hashers = if self.comparison_method == FileComparisonMethod::Hash
+            || self.comparison_method == FileComparisonMethod::Rehash
+        {
+            let h1 = crate::FileHasher::new(self.dir1.clone());
+            let h2 = crate::FileHasher::new(self.dir2.clone());
+            if self.comparison_method == FileComparisonMethod::Rehash {
+                h1.clear_cache();
+                h2.clear_cache();
+            }
+            Some((h1, h2))
         } else {
             None
         };

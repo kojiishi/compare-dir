@@ -93,6 +93,13 @@ impl FileHashCache {
         self.is_dirty.store(true, Ordering::Release);
     }
 
+    /// Clears all entries from the cache and marks it as dirty.
+    pub fn clear(&self) {
+        let mut entries = self.entries.lock().unwrap();
+        entries.clear();
+        self.is_dirty.store(true, Ordering::Release);
+    }
+
     /// Writes the cache out to `<base_dir>/.hashes` if there are dirty changes.
     pub fn save(&self) -> io::Result<()> {
         if !self.is_dirty.load(Ordering::Acquire) {
@@ -146,7 +153,7 @@ impl FileHashCache {
                 }
             }
         }
-        log::info!("Loaded hashes from {:?}", path);
+        log::info!("Loaded {} hashes from {:?}", entries.len(), path);
         entries
     }
 
@@ -233,6 +240,26 @@ mod tests {
 
         let retrieved_hash = loaded_cache.get(&path, modified);
         assert_eq!(retrieved_hash, Some(hash));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_file_hash_cache_clear() -> anyhow::Result<()> {
+        let dir = tempdir()?;
+        let cache = FileHashCache::new(dir.path());
+
+        let path = PathBuf::from("test.txt");
+        let modified = SystemTime::now();
+        let hash =
+            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
+
+        cache.insert(&path, modified, hash);
+        assert!(cache.get(&path, modified).is_some());
+
+        cache.clear();
+        assert!(cache.get(&path, modified).is_none());
+        assert!(cache.is_dirty.load(Ordering::Acquire));
 
         Ok(())
     }

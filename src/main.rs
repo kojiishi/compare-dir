@@ -3,10 +3,11 @@ use compare_dir::{DirectoryComparer, FileComparer, FileComparisonMethod, FileHas
 use std::io;
 use std::path::{self, PathBuf};
 
-#[derive(clap::ValueEnum, Clone, Debug)]
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
 enum CompareMethod {
     Size,
     Hash,
+    Rehash,
     Full,
 }
 
@@ -58,12 +59,16 @@ fn main() -> anyhow::Result<()> {
         comparer.comparison_method = match args.compare {
             CompareMethod::Size => FileComparisonMethod::Size,
             CompareMethod::Hash => FileComparisonMethod::Hash,
+            CompareMethod::Rehash => FileComparisonMethod::Rehash,
             CompareMethod::Full => FileComparisonMethod::Full,
         };
         comparer.run()
     } else {
         let mut hasher = FileHasher::new(args.dir1);
         hasher.buffer_size = args.buffer * 1024;
+        if args.compare == CompareMethod::Rehash {
+            hasher.clear_cache();
+        }
         hasher.run()
     }
 }

@@ -49,6 +49,11 @@ impl FileHasher {
         Ok(self.cache.save()?)
     }
 
+    /// Clears the loaded hashes in the cache.
+    pub fn clear_cache(&self) {
+        self.cache.clear();
+    }
+
     /// Executes the duplicate file finding process and prints results.
     pub fn run(&self) -> anyhow::Result<()> {
         let start_time = std::time::Instant::now();
