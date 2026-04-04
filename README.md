@@ -108,6 +108,11 @@ You can invalidate the hash cache
 by the `-c rehash` option,
 or by deleting the cache file.
 
+> [!NOTE]
+> Do not copy `.hash_cache`
+> if you intend to use this tool
+> to verify backup copies.
+
 ### Hash Cache Directory
 
 The directory to create the cache is determined by following steps:
