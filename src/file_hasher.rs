@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
@@ -30,15 +30,23 @@ pub struct DuplicatedFiles {
 pub struct FileHasher {
     dir: PathBuf,
     pub buffer_size: usize,
+    cache: Arc<FileHashCache>,
 }
 
 impl FileHasher {
     /// Creates a new `FileHasher` for the given directory.
     pub fn new(dir: PathBuf) -> Self {
+        let cache = FileHashCache::find_or_new(&dir);
         Self {
             dir,
             buffer_size: crate::FileComparer::DEFAULT_BUFFER_SIZE,
+            cache,
         }
+    }
+
+    /// Save the hash cache if it is dirty.
+    pub fn save_cache(&self) -> anyhow::Result<()> {
+        Ok(self.cache.save()?)
     }
 
     /// Executes the duplicate file finding process and prints results.
@@ -154,7 +162,6 @@ impl FileHasher {
         tx.send(HashProgress::StartDiscovering)?;
         let mut by_size: HashMap<u64, EntryState> = HashMap::new();
         let mut total_hashed = 0;
-        let cache = FileHashCache::find_or_new(&self.dir);
 
         rayon::scope(|scope| -> anyhow::Result<()> {
             for entry in WalkDir::new(&self.dir).into_iter().filter_map(|e| e.ok()) {
@@ -173,15 +180,8 @@ impl FileHasher {
                         EntryState::Single(first_path, first_modified) => {
                             // We found a second file of identical size.
                             // Time to start hashing both the *original* matching file and the *new* one!
-                            self.spawn_hash_task(
-                                scope,
-                                first_path,
-                                size,
-                                *first_modified,
-                                &tx,
-                                &cache,
-                            );
-                            self.spawn_hash_task(scope, &current_path, size, modified, &tx, &cache);
+                            self.spawn_hash_task(scope, first_path, size, *first_modified, &tx);
+                            self.spawn_hash_task(scope, &current_path, size, modified, &tx);
 
                             // Modify the state to indicate we are now fully hashing this size bucket.
                             *occ.get_mut() = EntryState::Hashing;
@@ -189,7 +189,7 @@ impl FileHasher {
                         }
                         EntryState::Hashing => {
                             // File size bucket already hashing; just dynamically spawn the new file immediately.
-                            self.spawn_hash_task(scope, &current_path, size, modified, &tx, &cache);
+                            self.spawn_hash_task(scope, &current_path, size, modified, &tx);
                             total_hashed += 1;
                         }
                     },
@@ -204,8 +204,7 @@ impl FileHasher {
 
         // The scope waits for all spawned tasks to complete.
         // Channel `tx` gets naturally closed when it drops at the end of this function.
-        let _ = cache.save();
-        Ok(())
+        self.save_cache()
     }
 
     fn spawn_hash_task<'scope>(
@@ -215,12 +214,11 @@ impl FileHasher {
         size: u64,
         modified: std::time::SystemTime,
         tx: &mpsc::Sender<HashProgress>,
-        cache: &std::sync::Arc<FileHashCache>,
     ) {
         let relative = path
-            .strip_prefix(cache.base_dir())
+            .strip_prefix(self.cache.base_dir())
             .expect("path should be in cache base_dir");
-        if let Some(hash) = cache.get(relative, modified) {
+        if let Some(hash) = self.cache.get(relative, modified) {
             let _ = tx.send(HashProgress::Result(path.to_path_buf(), size, hash, true));
             return;
         }
@@ -228,7 +226,7 @@ impl FileHasher {
         let path_owned = path.to_path_buf();
         let relative_owned = relative.to_path_buf();
         let tx_owned = tx.clone();
-        let cache_owned = cache.clone();
+        let cache_owned = self.cache.clone();
         scope.spawn(move |_| {
             if let Ok(hash) = Self::compute_hash(&path_owned, self.buffer_size) {
                 cache_owned.insert(&relative_owned, modified, hash);
