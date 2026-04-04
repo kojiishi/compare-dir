@@ -93,8 +93,10 @@ how files are compared.
 | --- | --- |
 | size | Compare by file sizes only. |
 | hash | Compare file contents by their hashes. |
-| rehash | Same as `hash`, without using cached hashes in the [hash cache]. |
+| rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
 | full | Compare file contents byte-by-byte. |
+
+Hash conflicts are unlikely, but `-c full` can help to double check.
 
 ### Hash Cache
 [hash cache]: #hash-cache
@@ -116,12 +118,12 @@ or by deleting the cache file.
 ### Hash Cache Directory
 
 The directory to create the cache is determined by following steps:
-1. Find the file in the specified directory.
-2. If not found, try to find in its ancestor directories.
-3. If not found, create in the specified directory.
+1. Find `.hash_cache` in the specified directory.
+2. If not found, try to find it in its ancestor directories.
+3. If not found, create it in the specified directory.
 
-If you want to use a cache file in an ancestor directory,
-you can create an empty file.
+You can create the cache file in one of ancestor directories.
+This is useful if you may want to run the tool for the parent directory.
 For example:
 ```bash
 touch ~/data/.hash_cache
