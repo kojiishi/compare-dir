@@ -237,6 +237,23 @@ impl FileHasher {
         });
     }
 
+    /// Gets the hash of a file, using the cache if available.
+    pub fn get_hash(&self, path: &Path) -> io::Result<blake3::Hash> {
+        let meta = fs::metadata(path)?;
+        let modified = meta.modified()?;
+        let relative = path
+            .strip_prefix(self.cache.base_dir())
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+        if let Some(hash) = self.cache.get(relative, modified) {
+            return Ok(hash);
+        }
+
+        let hash = Self::compute_hash(path, self.buffer_size)?;
+        self.cache.insert(relative, modified, hash);
+        Ok(hash)
+    }
+
     fn compute_hash(path: &Path, buffer_size: usize) -> io::Result<blake3::Hash> {
         let start_time = std::time::Instant::now();
         let mut f = fs::File::open(path)?;

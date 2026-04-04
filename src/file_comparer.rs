@@ -1,3 +1,4 @@
+use crate::file_hasher::FileHasher;
 use std::cmp::Ordering;
 use std::fs;
 use std::io::{self, Read};
@@ -19,6 +20,7 @@ pub struct FileComparer<'a> {
     path1: &'a Path,
     path2: &'a Path,
     pub buffer_size: usize,
+    pub hashers: Option<(&'a FileHasher, &'a FileHasher)>,
 }
 
 impl<'a> FileComparer<'a> {
@@ -29,6 +31,7 @@ impl<'a> FileComparer<'a> {
             path1,
             path2,
             buffer_size: Self::DEFAULT_BUFFER_SIZE,
+            hashers: None,
         }
     }
 
@@ -39,6 +42,12 @@ impl<'a> FileComparer<'a> {
     }
 
     pub(crate) fn compare_contents(&self) -> io::Result<bool> {
+        if let Some((hasher1, hasher2)) = self.hashers {
+            let hash1 = hasher1.get_hash(self.path1)?;
+            let hash2 = hasher2.get_hash(self.path2)?;
+            return Ok(hash1 == hash2);
+        }
+
         let mut f1 = fs::File::open(self.path1)?;
         let mut f2 = fs::File::open(self.path2)?;
 
@@ -200,73 +209,54 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    #[test]
-    fn test_compare_contents_identical() -> io::Result<()> {
+    fn check_compare(content1: &[u8], content2: &[u8], expected: bool) -> io::Result<()> {
         let mut f1 = NamedTempFile::new()?;
         let mut f2 = NamedTempFile::new()?;
-        f1.write_all(b"hello world")?;
-        f2.write_all(b"hello world")?;
+        f1.write_all(content1)?;
+        f2.write_all(content2)?;
+        f1.as_file().sync_all()?;
+        f2.as_file().sync_all()?;
+
+        // Without hashers
         let mut comparer = FileComparer::new(f1.path(), f2.path());
-
-        // Test stream code path
         comparer.buffer_size = 8192;
-        assert!(comparer.compare_contents()?);
+        assert_eq!(comparer.compare_contents()?, expected);
 
-        // Test mmap code path
         comparer.buffer_size = 0;
-        assert!(comparer.compare_contents()?);
+        assert_eq!(comparer.compare_contents()?, expected);
+
+        // With hashers
+        let dir1 = f1.path().parent().unwrap();
+        let dir2 = f2.path().parent().unwrap();
+
+        let hasher1 = FileHasher::new(dir1.to_path_buf());
+        let hasher2 = FileHasher::new(dir2.to_path_buf());
+
+        let mut comparer_hash = FileComparer::new(f1.path(), f2.path());
+        comparer_hash.hashers = Some((&hasher1, &hasher2));
+
+        assert_eq!(comparer_hash.compare_contents()?, expected);
+
         Ok(())
+    }
+
+    #[test]
+    fn test_compare_contents_identical() -> io::Result<()> {
+        check_compare(b"hello world", b"hello world", true)
     }
 
     #[test]
     fn test_compare_contents_different() -> io::Result<()> {
-        let mut f1 = NamedTempFile::new()?;
-        let mut f2 = NamedTempFile::new()?;
-        f1.write_all(b"hello world")?;
-        f2.write_all(b"hello rust")?;
-        let mut comparer = FileComparer::new(f1.path(), f2.path());
-
-        // Test stream code path
-        comparer.buffer_size = 8192;
-        assert!(!comparer.compare_contents()?);
-
-        // Test mmap code path
-        comparer.buffer_size = 0;
-        assert!(!comparer.compare_contents()?);
-        Ok(())
+        check_compare(b"hello world", b"hello rust", false)
     }
 
     #[test]
     fn test_compare_contents_different_size() -> io::Result<()> {
-        let mut f1 = NamedTempFile::new()?;
-        let mut f2 = NamedTempFile::new()?;
-        f1.write_all(b"hello world")?;
-        f2.write_all(b"hello")?;
-        let mut comparer = FileComparer::new(f1.path(), f2.path());
-
-        // Test stream code path
-        comparer.buffer_size = 8192;
-        assert!(!comparer.compare_contents()?);
-
-        // Test mmap code path
-        comparer.buffer_size = 0;
-        assert!(!comparer.compare_contents()?);
-        Ok(())
+        check_compare(b"hello world", b"hello", false)
     }
 
     #[test]
     fn test_compare_contents_empty_files() -> io::Result<()> {
-        let f1 = NamedTempFile::new()?;
-        let f2 = NamedTempFile::new()?;
-        let mut comparer = FileComparer::new(f1.path(), f2.path());
-
-        // Test stream code path
-        comparer.buffer_size = 8192;
-        assert!(comparer.compare_contents()?);
-
-        // Test mmap code path
-        comparer.buffer_size = 0;
-        assert!(comparer.compare_contents()?);
-        Ok(())
+        check_compare(b"", b"", true)
     }
 }
