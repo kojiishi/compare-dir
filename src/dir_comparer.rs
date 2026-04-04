@@ -143,7 +143,7 @@ impl DirectoryComparer {
 
         std::thread::scope(|scope| {
             scope.spawn(move || {
-                if let Err(e) = self.compare_streaming(tx) {
+                if let Err(e) = self.compare_streaming_ordered(tx) {
                     log::error!("Error during comparison: {}", e);
                 }
             });
@@ -197,26 +197,15 @@ impl DirectoryComparer {
         Ok(())
     }
 
-    fn get_next_file(it: &mut walkdir::IntoIter, dir: &Path) -> Option<(PathBuf, PathBuf)> {
-        for entry in it.filter_map(|e| e.ok()) {
-            if entry.file_type().is_file()
-                && let Ok(rel_path) = entry.path().strip_prefix(dir)
-            {
-                return Some((rel_path.to_path_buf(), entry.path().to_path_buf()));
-            }
-        }
-        None
-    }
-
     /// Performs the directory comparison and streams results via a channel.
     ///
     /// # Arguments
     /// * `tx` - A sender to transmit `FileComparisonResult` as they are computed.
-    fn compare_streaming(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
+    fn compare_streaming_ordered(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
         let (tx_unordered, rx_unordered) = mpsc::channel();
         std::thread::scope(|scope| {
             scope.spawn(move || {
-                if let Err(e) = self.compare_unordered_streaming(tx_unordered) {
+                if let Err(e) = self.compare_streaming(tx_unordered) {
                     log::error!("Error during unordered comparison: {}", e);
                 }
             });
@@ -247,7 +236,7 @@ impl DirectoryComparer {
         Ok(())
     }
 
-    fn compare_unordered_streaming(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
+    fn compare_streaming(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
         log::info!("Scanning directory: {:?}", self.dir1);
         let mut it1 = WalkDir::new(&self.dir1).sort_by_file_name().into_iter();
         log::info!("Scanning directory: {:?}", self.dir2);
@@ -336,6 +325,17 @@ impl DirectoryComparer {
         }
         Ok(())
     }
+
+    fn get_next_file(it: &mut walkdir::IntoIter, dir: &Path) -> Option<(PathBuf, PathBuf)> {
+        for entry in it.filter_map(|e| e.ok()) {
+            if entry.file_type().is_file()
+                && let Ok(rel_path) = entry.path().strip_prefix(dir)
+            {
+                return Some((rel_path.to_path_buf(), entry.path().to_path_buf()));
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -397,7 +397,7 @@ mod tests {
         let comparer = DirectoryComparer::new(dir1.path().to_path_buf(), dir2.path().to_path_buf());
         let (tx, rx) = mpsc::channel();
 
-        comparer.compare_streaming(tx)?;
+        comparer.compare_streaming_ordered(tx)?;
 
         let mut results = Vec::new();
         while let Ok(res) = rx.recv() {
@@ -452,7 +452,7 @@ mod tests {
         comparer.comparison_method = FileComparisonMethod::Size;
         let (tx, rx) = mpsc::channel();
 
-        comparer.compare_streaming(tx)?;
+        comparer.compare_streaming_ordered(tx)?;
 
         let mut results = Vec::new();
         while let Ok(res) = rx.recv() {
