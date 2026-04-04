@@ -141,6 +141,7 @@ impl FileHashCache {
     }
 
     fn load_cache(dir: &Path) -> HashMap<PathBuf, CacheEntry> {
+        let start_time = std::time::Instant::now();
         let mut entries = HashMap::new();
         let path = dir.join(Self::FILE_NAME);
         let Ok(file) = File::open(&path) else {
@@ -158,7 +159,12 @@ impl FileHashCache {
                 }
             }
         }
-        log::info!("Loaded {} hashes from {:?}", entries.len(), path);
+        log::info!(
+            "Loaded {} hashes from {:?} in {:?}",
+            entries.len(),
+            path,
+            start_time.elapsed()
+        );
         entries
     }
 

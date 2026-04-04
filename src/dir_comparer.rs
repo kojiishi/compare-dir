@@ -247,8 +247,10 @@ impl DirectoryComparer {
         let hashers = if self.comparison_method == FileComparisonMethod::Hash
             || self.comparison_method == FileComparisonMethod::Rehash
         {
-            let h1 = crate::FileHasher::new(self.dir1.clone());
-            let h2 = crate::FileHasher::new(self.dir2.clone());
+            let (h1, h2) = rayon::join(
+                || crate::FileHasher::new(self.dir1.clone()),
+                || crate::FileHasher::new(self.dir2.clone()),
+            );
             if self.comparison_method == FileComparisonMethod::Rehash {
                 h1.clear_cache();
                 h2.clear_cache();
