@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -13,10 +12,14 @@ pub struct CacheEntry {
     pub modified: SystemTime,
 }
 
+struct CacheState {
+    entries: HashMap<PathBuf, CacheEntry>,
+    is_dirty: bool,
+}
+
 pub struct FileHashCache {
     base_dir: PathBuf,
-    entries: Mutex<HashMap<PathBuf, CacheEntry>>,
-    is_dirty: AtomicBool,
+    state: Mutex<CacheState>,
 }
 
 static GLOBAL_CACHES: LazyLock<Mutex<HashMap<PathBuf, Arc<FileHashCache>>>> =
@@ -36,8 +39,10 @@ impl FileHashCache {
         let entries = Self::load_cache(dir);
         let cache = Arc::new(Self {
             base_dir: dir.to_path_buf(),
-            entries: Mutex::new(entries),
-            is_dirty: AtomicBool::new(false),
+            state: Mutex::new(CacheState {
+                entries,
+                is_dirty: false,
+            }),
         });
         map.insert(dir.to_path_buf(), cache.clone());
         cache
@@ -77,8 +82,8 @@ impl FileHashCache {
 
     /// Retrieves an entry's hash from the cache if the modified time matches.
     pub fn get(&self, path: &Path, modified: SystemTime) -> Option<Hash> {
-        let entries = self.entries.lock().unwrap();
-        if let Some(entry) = entries.get(path)
+        let state = self.state.lock().unwrap();
+        if let Some(entry) = state.entries.get(path)
             && entry.modified == modified
         {
             return Some(entry.hash);
@@ -88,47 +93,47 @@ impl FileHashCache {
 
     /// Inserts a hash into the cache for a given path and modified time.
     pub fn insert(&self, path: &Path, modified: SystemTime, hash: Hash) {
-        let mut entries = self.entries.lock().unwrap();
-        entries.insert(path.to_path_buf(), CacheEntry { hash, modified });
-        self.is_dirty.store(true, Ordering::Release);
+        let mut state = self.state.lock().unwrap();
+        state
+            .entries
+            .insert(path.to_path_buf(), CacheEntry { hash, modified });
+        state.is_dirty = true;
     }
 
     /// Clears all entries from the cache and marks it as dirty.
     pub fn clear(&self) {
-        let mut entries = self.entries.lock().unwrap();
-        entries.clear();
-        self.is_dirty.store(true, Ordering::Release);
+        let mut state = self.state.lock().unwrap();
+        state.entries.clear();
+        state.is_dirty = true;
     }
 
     /// Writes the cache out to `<base_dir>/.hashes` if there are dirty changes.
     pub fn save(&self) -> io::Result<()> {
-        if !self.is_dirty.load(Ordering::Acquire) {
+        let mut state = self.state.lock().unwrap();
+        if !state.is_dirty {
             return Ok(());
         }
 
         let start_time = std::time::Instant::now();
         let temp_path = self.base_dir.join(Self::TMP_FILE_NAME);
-        let num_entries;
+        let mut file = File::create(&temp_path)?;
         {
-            let entries = self.entries.lock().unwrap();
-            let mut file = File::create(&temp_path)?;
-            num_entries = entries.len();
-            {
-                let mut writer = std::io::BufWriter::new(&mut file);
-                for (rel_path, entry) in entries.iter() {
-                    Self::write_cache_entry(&mut writer, rel_path, entry)?;
-                }
-                writer.flush()?;
+            let mut writer = std::io::BufWriter::new(&mut file);
+            for (rel_path, entry) in state.entries.iter() {
+                Self::write_cache_entry(&mut writer, rel_path, entry)?;
             }
-            file.sync_all()?;
+            writer.flush()?;
         }
+        file.sync_all()?;
 
         let path = self.base_dir.join(Self::FILE_NAME);
         std::fs::rename(&temp_path, &path)?;
-        self.is_dirty.store(false, Ordering::Release);
+
+        state.is_dirty = false;
+
         log::info!(
             "Saved {} hashes to {:?} in {:?}",
-            num_entries,
+            state.entries.len(),
             path,
             start_time.elapsed()
         );
@@ -259,7 +264,7 @@ mod tests {
 
         cache.clear();
         assert!(cache.get(&path, modified).is_none());
-        assert!(cache.is_dirty.load(Ordering::Acquire));
+        assert!(cache.state.lock().unwrap().is_dirty);
 
         Ok(())
     }
@@ -288,7 +293,7 @@ mod tests {
         assert_eq!(cache.base_dir(), dir.path());
 
         // The cache should be empty
-        assert_eq!(cache.entries.lock().unwrap().len(), 0);
+        assert_eq!(cache.state.lock().unwrap().entries.len(), 0);
 
         Ok(())
     }
