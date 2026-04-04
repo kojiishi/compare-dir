@@ -67,9 +67,17 @@ For example:
 means that `dir/path` in `dir1` is newer than the file in `dir2`,
 but they have the same file sizes and contents.
 
-The following PowerShell example creates a list of paths of the same contents.
+The following bash example creates a list of paths of the same contents.
+```bash
+compare-dir -s <dir1> <dir2> | grep '^..=' | cut -c 5-
+```
+If you prefer `sed` over `cut`:
+```bash
+compare-dir -s <dir1> <dir2> | grep '^..=' | sed 's/^....//'
+```
+To do this in PowerShell:
 ```powershell
-compare-dir -s <dir1> <dir2> | sls '^..=' | %{$_ -replace '^.*? ', ''}
+compare-dir -s <dir1> <dir2> | sls '^..=' | %{$_ -replace '^....', ''}
 ```
 
 ## Hash Cache
