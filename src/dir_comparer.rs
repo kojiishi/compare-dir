@@ -252,8 +252,8 @@ impl DirectoryComparer {
                 || crate::FileHasher::new(self.dir2.clone()),
             );
             if self.comparison_method == FileComparisonMethod::Rehash {
-                h1.clear_cache();
-                h2.clear_cache();
+                h1.clear_cache()?;
+                h2.clear_cache()?;
             }
             Some((h1, h2))
         } else {

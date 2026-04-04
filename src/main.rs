@@ -67,7 +67,7 @@ fn main() -> anyhow::Result<()> {
         let mut hasher = FileHasher::new(args.dir1);
         hasher.buffer_size = args.buffer * 1024;
         if args.compare == CompareMethod::Rehash {
-            hasher.clear_cache();
+            hasher.clear_cache()?;
         }
         hasher.run()
     }

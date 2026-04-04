@@ -101,9 +101,13 @@ impl FileHashCache {
     }
 
     /// Clears all entries from the cache and marks it as dirty.
-    pub fn clear(&self) {
+    pub fn clear(&self, path: &Path) {
         let mut state = self.state.lock().unwrap();
-        state.entries.clear();
+        if path.as_os_str().is_empty() {
+            state.entries.clear();
+        } else {
+            state.entries.retain(|p, _| !p.starts_with(path));
+        }
         state.is_dirty = true;
     }
 
@@ -268,9 +272,33 @@ mod tests {
         cache.insert(&path, modified, hash);
         assert!(cache.get(&path, modified).is_some());
 
-        cache.clear();
+        cache.clear(Path::new(""));
         assert!(cache.get(&path, modified).is_none());
         assert!(cache.state.lock().unwrap().is_dirty);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_file_hash_cache_clear_scoped() -> anyhow::Result<()> {
+        let dir = tempdir()?;
+        let cache = FileHashCache::new(dir.path());
+
+        let path1 = PathBuf::from("a/test1.txt");
+        let path2 = PathBuf::from("b/test2.txt");
+        let modified = SystemTime::now();
+        let hash =
+            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
+
+        cache.insert(&path1, modified, hash);
+        cache.insert(&path2, modified, hash);
+
+        assert!(cache.get(&path1, modified).is_some());
+        assert!(cache.get(&path2, modified).is_some());
+
+        cache.clear(Path::new("a"));
+        assert!(cache.get(&path1, modified).is_none());
+        assert!(cache.get(&path2, modified).is_some());
 
         Ok(())
     }

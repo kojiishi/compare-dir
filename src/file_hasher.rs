@@ -50,8 +50,10 @@ impl FileHasher {
     }
 
     /// Clears the loaded hashes in the cache.
-    pub fn clear_cache(&self) {
-        self.cache.clear();
+    pub fn clear_cache(&self) -> anyhow::Result<()> {
+        let relative = self.dir.strip_prefix(self.cache.base_dir())?;
+        self.cache.clear(relative);
+        Ok(())
     }
 
     /// Executes the duplicate file finding process and prints results.
