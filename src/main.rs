@@ -1,7 +1,14 @@
 use clap::{ArgAction, Parser};
-use compare_dir::{DirectoryComparer, FileHasher};
+use compare_dir::{DirectoryComparer, FileComparer, FileComparisonMethod, FileHasher};
 use std::io;
 use std::path::{self, PathBuf};
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum CompareMethod {
+    Size,
+    Hash,
+    Full,
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Compare two directories or find duplicate files.", long_about = None)]
@@ -12,21 +19,25 @@ struct Args {
     /// Path to the second directory. If omitted, find duplicate files in dir1.
     dir2: Option<PathBuf>,
 
+    /// Method for comparing files.
+    #[arg(short, long, default_value = "hash")]
+    compare: CompareMethod,
+
+    /// Symbolize output for programs to read.
+    #[arg(short, long)]
+    symbol: bool,
+
+    /// Buffer size for file comparison in KB.
+    #[arg(long, default_value_t = FileComparer::DEFAULT_BUFFER_SIZE_KB)]
+    buffer: usize,
+
     /// Number of parallel threads for file comparison. If 0, uses the default.
     #[arg(short, long, default_value_t = 0)]
     parallel: usize,
 
-    /// Use symbolized output.
-    #[arg(short, long)]
-    symbol: bool,
-
     /// Enable verbose logging to stderr.
     #[arg(short, long, action = ArgAction::Count)]
     verbose: u8,
-
-    /// Buffer size for file comparison in KB.
-    #[arg(long, default_value_t = 64)]
-    buffer: usize,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -44,6 +55,11 @@ fn main() -> anyhow::Result<()> {
         let mut comparer = DirectoryComparer::new(args.dir1, dir2);
         comparer.is_symbols_format = args.symbol;
         comparer.buffer_size = args.buffer * 1024;
+        comparer.comparison_method = match args.compare {
+            CompareMethod::Size => FileComparisonMethod::Size,
+            CompareMethod::Hash => FileComparisonMethod::Hash,
+            CompareMethod::Full => FileComparisonMethod::Full,
+        };
         comparer.run()
     } else {
         let mut hasher = FileHasher::new(args.dir1);

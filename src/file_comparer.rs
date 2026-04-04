@@ -24,7 +24,8 @@ pub struct FileComparer<'a> {
 }
 
 impl<'a> FileComparer<'a> {
-    pub const DEFAULT_BUFFER_SIZE: usize = 64 * 1024;
+    pub const DEFAULT_BUFFER_SIZE_KB: usize = 64;
+    pub const DEFAULT_BUFFER_SIZE: usize = Self::DEFAULT_BUFFER_SIZE_KB * 1024;
 
     pub fn new(path1: &'a Path, path2: &'a Path) -> Self {
         Self {
@@ -114,7 +115,11 @@ impl FileComparisonResult {
         }
     }
 
-    pub fn update(&mut self, comparer: &FileComparer) -> anyhow::Result<()> {
+    pub fn update(
+        &mut self,
+        comparer: &FileComparer,
+        should_compare_content: bool,
+    ) -> anyhow::Result<()> {
         let (m1, m2) = comparer.metadata()?;
         let t1 = m1.modified()?;
         let t2 = m2.modified()?;
@@ -124,7 +129,7 @@ impl FileComparisonResult {
         let s2 = m2.len();
         self.size_comparison = Some(s1.cmp(&s2));
 
-        if s1 == s2 {
+        if should_compare_content && s1 == s2 {
             log::info!("Comparing content: {:?}", self.relative_path);
             self.is_content_same = Some(comparer.compare_contents()?);
         }

@@ -80,12 +80,24 @@ impl ComparisonSummary {
     }
 }
 
+/// Methods for comparing files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileComparisonMethod {
+    /// Compare only size and modification time.
+    Size,
+    /// Compare by hash (BLAKE3).
+    Hash,
+    /// Compare byte-by-byte.
+    Full,
+}
+
 /// A tool for comparing the contents of two directories.
 pub struct DirectoryComparer {
     dir1: PathBuf,
     dir2: PathBuf,
     pub is_symbols_format: bool,
     pub buffer_size: usize,
+    pub comparison_method: FileComparisonMethod,
 }
 
 impl DirectoryComparer {
@@ -96,6 +108,7 @@ impl DirectoryComparer {
             dir2,
             is_symbols_format: false,
             buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
+            comparison_method: FileComparisonMethod::Hash,
         }
     }
 
@@ -240,6 +253,14 @@ impl DirectoryComparer {
         let mut next1 = Self::get_next_file(&mut it1, &self.dir1);
         let mut next2 = Self::get_next_file(&mut it2, &self.dir2);
         let mut index = 0;
+        let hashers = if self.comparison_method == FileComparisonMethod::Hash {
+            Some((
+                crate::FileHasher::new(self.dir1.clone()),
+                crate::FileHasher::new(self.dir2.clone()),
+            ))
+        } else {
+            None
+        };
         tx.send(CompareProgress::StartOfComparison)?;
         rayon::scope(|scope| {
             loop {
@@ -274,10 +295,15 @@ impl DirectoryComparer {
                         let buffer_size = self.buffer_size;
                         let tx_clone = tx.clone();
                         let i = index;
+                        let should_compare = self.comparison_method != FileComparisonMethod::Size;
+                        let hashers_ref = hashers.as_ref();
                         scope.spawn(move |_| {
                             let mut comparer = FileComparer::new(&path1, &path2);
                             comparer.buffer_size = buffer_size;
-                            if let Err(error) = result.update(&comparer) {
+                            if let Some((h1, h2)) = hashers_ref {
+                                comparer.hashers = Some((h1, h2));
+                            }
+                            if let Err(error) = result.update(&comparer, should_compare) {
                                 log::error!("Error during comparison of {:?}: {}", rel_path, error);
                             }
                             if tx_clone.send(CompareProgress::Result(i, result)).is_err() {
@@ -393,6 +419,42 @@ mod tests {
         assert_eq!(results[3].relative_path.to_str().unwrap(), "same.txt");
         assert_eq!(results[3].classification, Classification::InBoth);
         assert_eq!(results[3].size_comparison, Some(Ordering::Equal));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_directory_comparer_size_mode() -> anyhow::Result<()> {
+        let dir1 = tempfile::tempdir()?;
+        let dir2 = tempfile::tempdir()?;
+
+        let file1_path = dir1.path().join("file.txt");
+        let mut file1 = fs::File::create(&file1_path)?;
+        file1.write_all(b"content 1")?;
+
+        let file2_path = dir2.path().join("file.txt");
+        let mut file2 = fs::File::create(&file2_path)?;
+        file2.write_all(b"content 2")?; // same length, different content
+
+        let mut comparer =
+            DirectoryComparer::new(dir1.path().to_path_buf(), dir2.path().to_path_buf());
+        comparer.comparison_method = FileComparisonMethod::Size;
+        let (tx, rx) = mpsc::channel();
+
+        comparer.compare_streaming(tx)?;
+
+        let mut results = Vec::new();
+        while let Ok(res) = rx.recv() {
+            if let CompareProgress::Result(_, r) = res {
+                results.push(r);
+            }
+        }
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].relative_path.to_str().unwrap(), "file.txt");
+        assert_eq!(results[0].classification, Classification::InBoth);
+        assert_eq!(results[0].size_comparison, Some(Ordering::Equal));
+        assert_eq!(results[0].is_content_same, None);
 
         Ok(())
     }
