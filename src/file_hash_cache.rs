@@ -317,13 +317,15 @@ mod tests {
         let path = Path::new("test.txt");
         let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
         let hash = Hash::from_hex(hash_hex)?;
-        let modified = UNIX_EPOCH + Duration::new(12345, 67890);
+        // While Linux supports 1-nanosecond resolution, Windows `FILETIME` is
+        // 100-nanosecond intervals.
+        let modified = UNIX_EPOCH + Duration::new(12345, 67800);
         let entry = CacheEntry { hash, modified };
 
         FileHashCache::write_cache_entry(&mut buf, path, &entry)?;
 
         let output = String::from_utf8(buf)?;
-        let expected = format!("{} 12345 67890 test.txt\n", hash_hex);
+        let expected = format!("{} 12345 67800 test.txt\n", hash_hex);
         assert_eq!(output, expected);
         Ok(())
     }
