@@ -77,20 +77,46 @@ compare-dir -s <dir1> <dir2> | grep '^..=' | sed 's/^....//'
 ```
 To do this in PowerShell:
 ```powershell
-compare-dir -s <dir1> <dir2> | sls '^..=' | %{$_ -replace '^....', ''}
+compare-dir -s <dir1> <dir2> | sls '^..=' | %{$_ -replace '^....',''}
 ```
 
-## Hash Cache
+## Hash
 
-The file hashes are cached in a file named `.hash_cache`.
+`compare-dir` uses file hashes
+when comparing file contents if file sizes are the same, and
+when finding duplicated files.
 
-If you think file contents may be changed
-without their last modified time changed,
-please remove the cache file.
-The tool will then recompute the hashes.
+The `--compare` (or `-c`) option can change
+how files are compared.
 
-If one of ancestor directories has the cache file,
-the nearest one is used instead.
+| `--compare` | Meaning |
+| --- | --- |
+| size | Compare by file sizes only. |
+| hash | Compare file contents by their hashes. |
+| rehash | Same as `hash`, without using cached hashes in the [hash cache]. |
+| full | Compare file contents byte-by-byte. |
+
+### Hash Cache
+[hash cache]: #hash-cache
+
+File hashes are saved to a file named `.hash_cache`
+to make subsequent runs faster.
+
+If file contents are changed without changing their modified time,
+the cache needs to be invalidated.
+You can invalidate the hash cache
+by the `-c rehash` option,
+or by deleting the cache file.
+
+### Hash Cache Directory
+
+The directory to create the cache is determined by following steps:
+1. Find the file in the specified directory.
+2. If not found, try to find in its ancestor directories.
+3. If not found, create in the specified directory.
+
+If you want to use a cache file in an ancestor directory,
+you can create an empty file.
 For example:
 ```bash
 touch ~/data/.hash_cache
