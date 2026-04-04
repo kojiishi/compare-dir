@@ -111,7 +111,8 @@ by the `-c rehash` option,
 or by deleting the cache file.
 
 > [!NOTE]
-> Do not copy `.hash_cache`
+> When backing up,
+> do not copy `.hash_cache`
 > if you intend to use this tool
 > to verify backup copies.
 
