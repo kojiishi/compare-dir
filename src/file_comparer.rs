@@ -136,11 +136,13 @@ impl FileComparisonResult {
         Ok(())
     }
 
+    /// True if the two files are identical; i.e., modified times and sizes are
+    /// the same. Contents are the same too, or content comparison was skipped.
     pub fn is_identical(&self) -> bool {
         self.classification == Classification::InBoth
             && self.modified_time_comparison == Some(Ordering::Equal)
             && self.size_comparison == Some(Ordering::Equal)
-            && self.is_content_same == Some(true)
+            && self.is_content_same != Some(false)
     }
 
     pub fn to_symbol_string(&self) -> String {
@@ -177,27 +179,18 @@ impl FileComparisonResult {
             Classification::OnlyInDir2 => parts.push(format!("Only in {}", dir2_name)),
             Classification::InBoth => {}
         }
-
-        if let Some(comp) = &self.modified_time_comparison {
-            match comp {
-                Ordering::Greater => parts.push(format!("{} is newer", dir1_name)),
-                Ordering::Less => parts.push(format!("{} is newer", dir2_name)),
-                Ordering::Equal => {}
-            }
+        match self.modified_time_comparison {
+            Some(Ordering::Greater) => parts.push(format!("{} is newer", dir1_name)),
+            Some(Ordering::Less) => parts.push(format!("{} is newer", dir2_name)),
+            Some(Ordering::Equal) | None => {}
         }
-
-        if let Some(comp) = &self.size_comparison {
-            match comp {
-                Ordering::Greater => parts.push(format!("Size of {} is larger", dir1_name)),
-                Ordering::Less => parts.push(format!("Size of {} is larger", dir2_name)),
-                Ordering::Equal => {}
-            }
+        match self.size_comparison {
+            Some(Ordering::Greater) => parts.push(format!("Size of {} is larger", dir1_name)),
+            Some(Ordering::Less) => parts.push(format!("Size of {} is larger", dir2_name)),
+            Some(Ordering::Equal) | None => {}
         }
-
-        if let Some(same) = self.is_content_same
-            && !same
-        {
-            parts.push("Content differ".to_string());
+        if self.is_content_same == Some(false) {
+            parts.push("Contents differ".to_string());
         }
 
         if parts.is_empty() {
