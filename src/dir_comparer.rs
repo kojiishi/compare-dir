@@ -1,4 +1,4 @@
-use crate::file_comparer::{Classification, FileComparer, FileComparisonResult};
+use crate::{Classification, FileComparer, FileComparisonResult, FileHasher};
 use indicatif::{ProgressBar, ProgressStyle};
 
 use std::cmp::Ordering;
@@ -133,14 +133,11 @@ impl DirectoryComparer {
             ProgressStyle::with_template("[{elapsed_precise}] {spinner:.green} {msg}").unwrap(),
         );
         progress.set_message("Scanning directories...");
-
         let start_time = std::time::Instant::now();
         let mut summary = ComparisonSummary::default();
         let dir1_str = self.dir1.to_str().unwrap_or("dir1");
         let dir2_str = self.dir2.to_str().unwrap_or("dir2");
-
         let (tx, rx) = mpsc::channel();
-
         std::thread::scope(|scope| {
             scope.spawn(move || {
                 if let Err(e) = self.compare_streaming_ordered(tx) {
@@ -188,11 +185,9 @@ impl DirectoryComparer {
                 }
             }
         });
-
         progress.finish();
-
         eprintln!("\n--- Comparison Summary ---");
-        let _ = summary.print(&mut std::io::stderr(), dir1_str, dir2_str);
+        summary.print(&mut std::io::stderr(), dir1_str, dir2_str)?;
         eprintln!("Comparison finished in {:?}.", start_time.elapsed());
         Ok(())
     }
@@ -212,7 +207,6 @@ impl DirectoryComparer {
 
             let mut buffer = HashMap::new();
             let mut next_index = 0;
-
             for event in rx_unordered {
                 if let CompareProgress::Result(i, _) = &event {
                     let index = *i;
@@ -248,8 +242,8 @@ impl DirectoryComparer {
             || self.comparison_method == FileComparisonMethod::Rehash
         {
             let (h1, h2) = rayon::join(
-                || crate::FileHasher::new(self.dir1.clone()),
-                || crate::FileHasher::new(self.dir2.clone()),
+                || FileHasher::new(self.dir1.clone()),
+                || FileHasher::new(self.dir2.clone()),
             );
             if self.comparison_method == FileComparisonMethod::Rehash {
                 h1.clear_cache()?;
@@ -286,9 +280,6 @@ impl DirectoryComparer {
                     Ordering::Equal => {
                         let (rel_path, path1) = next1.take().unwrap();
                         let (_, path2) = next2.take().unwrap();
-
-                        let mut result =
-                            FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
                         let buffer_size = self.buffer_size;
                         let tx_clone = tx.clone();
                         let i = index;
@@ -300,6 +291,8 @@ impl DirectoryComparer {
                             if let Some((h1, h2)) = hashers_ref {
                                 comparer.hashers = Some((h1, h2));
                             }
+                            let mut result =
+                                FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
                             if let Err(error) = result.update(&comparer, should_compare) {
                                 log::error!("Error during comparison of {:?}: {}", rel_path, error);
                             }
@@ -316,10 +309,8 @@ impl DirectoryComparer {
                     }
                 }
             }
-
             tx.send(CompareProgress::TotalFiles(index))
         })?;
-
         if let Some((h1, h2)) = hashers {
             let (r1, r2) = rayon::join(|| h1.save_cache(), || h2.save_cache());
             r1?;
