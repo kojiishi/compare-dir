@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn test_comparison_result_empty() {
         let result = FileComparisonResult::new(PathBuf::from("test.txt"), Classification::InBoth);
-        assert_eq!(result.is_identical(), false);
+        assert!(!result.is_identical());
         assert_eq!(result.to_string("dir1", "dir2"), "Unknown");
         assert_eq!(result.to_symbol_string(), "=??");
     }
@@ -280,7 +280,7 @@ mod tests {
             FileComparisonResult::new(PathBuf::from("test.txt"), Classification::InBoth);
         result.modified_time_comparison = Some(Ordering::Equal);
         result.size_comparison = Some(Ordering::Equal);
-        assert_eq!(result.is_identical(), true);
+        assert!(result.is_identical());
         assert_eq!(result.to_string("dir1", "dir2"), "Identical");
         assert_eq!(result.to_symbol_string(), "===");
     }
