@@ -44,14 +44,15 @@ impl<'a> FileComparer<'a> {
 
     pub(crate) fn compare_contents(&self) -> io::Result<bool> {
         if let Some((hasher1, hasher2)) = self.hashers {
-            let hash1 = hasher1.get_hash(self.path1)?;
-            let hash2 = hasher2.get_hash(self.path2)?;
-            return Ok(hash1 == hash2);
+            let (hash1, hash2) = rayon::join(
+                || hasher1.get_hash(self.path1),
+                || hasher2.get_hash(self.path2),
+            );
+            return Ok(hash1? == hash2?);
         }
 
         let mut f1 = fs::File::open(self.path1)?;
         let mut f2 = fs::File::open(self.path2)?;
-
         if self.buffer_size == 0 {
             let len1 = f1.metadata()?.len();
             let len2 = f2.metadata()?.len();
@@ -61,7 +62,6 @@ impl<'a> FileComparer<'a> {
             if len1 == 0 {
                 return Ok(true);
             }
-
             let mmap1 = unsafe { memmap2::MmapOptions::new().map(&f1)? };
             let mmap2 = unsafe { memmap2::MmapOptions::new().map(&f2)? };
             return Ok(mmap1[..] == mmap2[..]);
@@ -69,7 +69,6 @@ impl<'a> FileComparer<'a> {
 
         let mut buf1 = vec![0u8; self.buffer_size];
         let mut buf2 = vec![0u8; self.buffer_size];
-
         loop {
             // Safety from Deadlocks: rayon::join is specifically designed for nested parallelism.
             // It uses work-stealing, meaning if all threads in the pool are busy, the thread
@@ -77,11 +76,9 @@ impl<'a> FileComparer<'a> {
             let (n1, n2) = rayon::join(|| f1.read(&mut buf1), || f2.read(&mut buf2));
             let n1 = n1?;
             let n2 = n2?;
-
             if n1 != n2 || buf1[..n1] != buf2[..n2] {
                 return Ok(false);
             }
-
             if n1 == 0 {
                 return Ok(true);
             }
