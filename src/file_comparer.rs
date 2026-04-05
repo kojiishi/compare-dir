@@ -180,25 +180,32 @@ impl FileComparisonResult {
             Classification::OnlyInDir2 => parts.push(format!("Only in {}", dir2_name)),
             Classification::InBoth => {}
         }
+        let mut has_equals = false;
         match self.modified_time_comparison {
             Some(Ordering::Greater) => parts.push(format!("{} is newer", dir1_name)),
             Some(Ordering::Less) => parts.push(format!("{} is newer", dir2_name)),
-            Some(Ordering::Equal) | None => {}
+            Some(Ordering::Equal) => has_equals = true,
+            None => {}
         }
         match self.size_comparison {
             Some(Ordering::Greater) => parts.push(format!("Size of {} is larger", dir1_name)),
             Some(Ordering::Less) => parts.push(format!("Size of {} is larger", dir2_name)),
-            Some(Ordering::Equal) | None => {}
+            Some(Ordering::Equal) => has_equals = true,
+            None => {}
         }
-        if self.is_content_same == Some(false) {
-            parts.push("Contents differ".to_string());
+        match self.is_content_same {
+            Some(false) => parts.push("Contents differ".to_string()),
+            Some(true) => has_equals = true,
+            None => {}
         }
 
         if parts.is_empty() {
-            "Identical".to_string()
-        } else {
-            parts.join(", ")
+            if !has_equals {
+                return "Unknown".to_string();
+            }
+            return "Identical".to_string();
         }
+        parts.join(", ")
     }
 }
 
@@ -257,5 +264,24 @@ mod tests {
     #[test]
     fn test_compare_contents_empty_files() -> io::Result<()> {
         check_compare(b"", b"", true)
+    }
+
+    #[test]
+    fn test_comparison_result_empty() {
+        let result = FileComparisonResult::new(PathBuf::from("test.txt"), Classification::InBoth);
+        assert_eq!(result.is_identical(), false);
+        assert_eq!(result.to_string("dir1", "dir2"), "Unknown");
+        assert_eq!(result.to_symbol_string(), "=  ");
+    }
+
+    #[test]
+    fn test_comparison_result_contents_skipped() {
+        let mut result =
+            FileComparisonResult::new(PathBuf::from("test.txt"), Classification::InBoth);
+        result.modified_time_comparison = Some(Ordering::Equal);
+        result.size_comparison = Some(Ordering::Equal);
+        assert_eq!(result.is_identical(), true);
+        assert_eq!(result.to_string("dir1", "dir2"), "Identical");
+        assert_eq!(result.to_symbol_string(), "===");
     }
 }
