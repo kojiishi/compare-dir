@@ -59,10 +59,12 @@ which is easier for programs to read.
 | 2nd | `=` | Modified time are the same. |
 || `>` | `dir1` is newer. |
 || `<` | `dir2` is newer. |
+|| `?` | Modified time are unknown. |
 | 3rd | `=` | Same file sizes and contents. |
 || `!` | Same file sizes but contents differ. |
 || `>` | `dir1` is larger. |
 || `<` | `dir2` is larger. |
+|| `?` | Sizes are unknown. |
 
 For example:
 ```

@@ -153,13 +153,13 @@ impl FileComparisonResult {
                 Classification::InBoth => '=',
             },
             match self.modified_time_comparison {
-                None => ' ',
+                None => '?',
                 Some(Ordering::Greater) => '>',
                 Some(Ordering::Less) => '<',
                 Some(Ordering::Equal) => '=',
             },
             match self.size_comparison {
-                None => ' ',
+                None => '?',
                 Some(Ordering::Greater) => '>',
                 Some(Ordering::Less) => '<',
                 Some(Ordering::Equal) => {
@@ -271,7 +271,7 @@ mod tests {
         let result = FileComparisonResult::new(PathBuf::from("test.txt"), Classification::InBoth);
         assert_eq!(result.is_identical(), false);
         assert_eq!(result.to_string("dir1", "dir2"), "Unknown");
-        assert_eq!(result.to_symbol_string(), "=  ");
+        assert_eq!(result.to_symbol_string(), "=??");
     }
 
     #[test]
