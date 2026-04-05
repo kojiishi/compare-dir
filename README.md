@@ -88,16 +88,23 @@ compare-dir -s <dir1> <dir2> | sls '^..=' | %{$_ -replace '^....',''}
 
 ## Hash
 
-`compare-dir` uses file hashes
-when comparing file contents if file sizes are the same, and
-when finding duplicated files.
+File hashes are used:
+* to compare file contents if file sizes are the same, and
+* to find duplicated files.
+
+When comparing two files,
+comparing byte-to-byte is faster
+if you compare them only once,
+but comparing hashes is faster
+if you compare them multiple times
+because hashes are cached in the [hash cache].
 
 The `--compare` (or `-c`) option can change
 how files are compared.
 
 | `--compare` | Meaning |
 | --- | --- |
-| size | Compare by file sizes only. |
+| size | Compare only by file sizes. |
 | hash | Compare file contents by their hashes. |
 | rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
 | full | Compare file contents byte-by-byte. |
