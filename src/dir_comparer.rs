@@ -320,11 +320,17 @@ impl DirectoryComparer {
     }
 
     fn get_next_file(it: &mut walkdir::IntoIter, dir: &Path) -> Option<(PathBuf, PathBuf)> {
-        for entry in it.filter_map(|e| e.ok()) {
-            if entry.file_type().is_file()
-                && let Ok(rel_path) = entry.path().strip_prefix(dir)
-            {
-                return Some((rel_path.to_path_buf(), entry.path().to_path_buf()));
+        for entry in it {
+            match entry {
+                Ok(entry) => {
+                    if entry.file_type().is_file() {
+                        let rel_path = entry.path().strip_prefix(dir).unwrap();
+                        return Some((rel_path.to_path_buf(), entry.path().to_path_buf()));
+                    }
+                }
+                Err(error) => {
+                    log::error!("Error while walking directory: {}", error);
+                }
             }
         }
         None
