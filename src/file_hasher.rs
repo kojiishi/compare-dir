@@ -1,5 +1,5 @@
+use crate::ProgressReporter;
 use crate::file_hash_cache::FileHashCache;
-use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
@@ -89,12 +89,7 @@ impl FileHasher {
 
     /// Finds duplicated files and returns a list of duplicate groups.
     pub fn find_duplicates(&self) -> anyhow::Result<Vec<DuplicatedFiles>> {
-        let progress = ProgressBar::new_spinner();
-        progress.enable_steady_tick(std::time::Duration::from_millis(120));
-        progress.set_style(
-            ProgressStyle::with_template("[{elapsed_precise}] {spinner:.green} {pos:>7} {msg}")
-                .unwrap(),
-        );
+        let progress = ProgressReporter::new();
         progress.set_message("Scanning directories...");
 
         let (tx, rx) = mpsc::channel();
@@ -114,14 +109,6 @@ impl FileHasher {
                     }
                     HashProgress::TotalFiles(total) => {
                         progress.set_length(total as u64);
-                        if total > 0 {
-                            progress.set_style(
-                                ProgressStyle::with_template(
-                                    "[{elapsed_precise}] {bar:40.cyan/blue} {percent}% {pos:>7}/{len:7} {msg}",
-                                )
-                                .unwrap(),
-                            );
-                        }
                         if num_cache_hits > 0 {
                             progress.set_message(format!(" ({} cache hits)", num_cache_hits));
                         }

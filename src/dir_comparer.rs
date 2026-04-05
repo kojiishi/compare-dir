@@ -1,5 +1,4 @@
-use crate::{Classification, FileComparer, FileComparisonResult, FileHasher};
-use indicatif::{ProgressBar, ProgressStyle};
+use crate::{Classification, FileComparer, FileComparisonResult, FileHasher, ProgressReporter};
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -127,12 +126,7 @@ impl DirectoryComparer {
     /// Executes the directory comparison and prints results to stdout.
     /// This is a convenience method for CLI usage.
     pub fn run(&self) -> anyhow::Result<()> {
-        let progress = ProgressBar::new_spinner();
-        progress.enable_steady_tick(std::time::Duration::from_millis(120));
-        progress.set_style(
-            ProgressStyle::with_template("[{elapsed_precise}] {spinner:.green} {pos:>7} {msg}")
-                .unwrap(),
-        );
+        let progress = ProgressReporter::new();
         progress.set_message("Scanning directories...");
         let start_time = std::time::Instant::now();
         let mut summary = ComparisonSummary::default();
@@ -154,12 +148,6 @@ impl DirectoryComparer {
                     }
                     CompareProgress::TotalFiles(total_files) => {
                         progress.set_length(total_files as u64);
-                        progress.set_style(
-                            ProgressStyle::with_template(
-                                "[{elapsed_precise}] {bar:40.cyan/blue} {percent}% {pos:>7}/{len:7} {msg}",
-                            )
-                            .unwrap(),
-                        );
                         progress.set_message("");
                     }
                     CompareProgress::Result(_, result) => {

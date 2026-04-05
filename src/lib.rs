@@ -2,10 +2,12 @@ mod dir_comparer;
 mod file_comparer;
 pub(crate) mod file_hash_cache;
 mod file_hasher;
+mod progress_reporter;
 
 pub use dir_comparer::{DirectoryComparer, FileComparisonMethod};
 pub use file_comparer::{Classification, FileComparer, FileComparisonResult};
 pub use file_hasher::{DuplicatedFiles, FileHasher};
+pub(crate) use progress_reporter::ProgressReporter;
 
 pub(crate) fn human_readable_size(size: u64) -> String {
     const MB: u64 = 1024 * 1024;
