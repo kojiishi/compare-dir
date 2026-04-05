@@ -28,12 +28,12 @@ struct Args {
     #[arg(short, long)]
     symbol: bool,
 
-    /// Buffer size for file comparison in KB.
+    /// Buffer size when reading files in KB. If 0, uses mmap.
     #[arg(long, default_value_t = FileComparer::DEFAULT_BUFFER_SIZE_KB)]
     buffer: usize,
 
-    /// Number of parallel threads for file comparison. If 0, uses the default.
-    #[arg(short, long, default_value_t = 0)]
+    /// Number of parallel threads. If 0, uses the default.
+    #[arg(short, long, default_value_t = 8)]
     parallel: usize,
 
     /// Enable verbose logging to stderr.
