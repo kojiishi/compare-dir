@@ -92,14 +92,14 @@ impl FileHasher {
         let progress = ProgressBar::new_spinner();
         progress.enable_steady_tick(std::time::Duration::from_millis(120));
         progress.set_style(
-            ProgressStyle::with_template("[{elapsed_precise}] {spinner:.green} {msg}").unwrap(),
+            ProgressStyle::with_template("[{elapsed_precise}] {spinner:.green} {pos:>7} {msg}")
+                .unwrap(),
         );
-        progress.set_message("Discovering and hashing files...");
+        progress.set_message("Scanning directories...");
 
         let (tx, rx) = mpsc::channel();
         let mut by_hash: HashMap<blake3::Hash, DuplicatedFiles> = HashMap::new();
-        let mut hashed_count = 0;
-        let mut cache_hits = 0;
+        let mut num_cache_hits = 0;
         std::thread::scope(|scope| {
             scope.spawn(|| {
                 if let Err(e) = self.find_duplicates_internal(tx) {
@@ -110,7 +110,7 @@ impl FileHasher {
             while let Ok(event) = rx.recv() {
                 match event {
                     HashProgress::StartDiscovering => {
-                        progress.set_message("Discovering and hashing files...");
+                        progress.set_message("Hashing files...");
                     }
                     HashProgress::TotalFiles(total) => {
                         progress.set_length(total as u64);
@@ -122,22 +122,21 @@ impl FileHasher {
                                 .unwrap(),
                             );
                         }
-                        progress.set_message(format!(" ({} cache hits)", cache_hits));
+                        if num_cache_hits > 0 {
+                            progress.set_message(format!(" ({} cache hits)", num_cache_hits));
+                        }
                     }
                     HashProgress::Result(path, size, hash, is_cache_hit) => {
-                        hashed_count += 1;
                         if is_cache_hit {
-                            cache_hits += 1;
-                        }
-
-                        // Avoid overwriting the precise progress bar message once total length is known
-                        if progress.length().is_none() {
-                            progress.set_message(format!(
-                                "Hashed {} files ({} cache hits)...",
-                                hashed_count, cache_hits
-                            ));
-                        } else if cache_hits > 0 {
-                            progress.set_message(format!(" ({} cache hits)", cache_hits));
+                            num_cache_hits += 1;
+                            if progress.length().is_none() {
+                                progress.set_message(format!(
+                                    "Hashing files... ({} cache hits)",
+                                    num_cache_hits
+                                ));
+                            } else {
+                                progress.set_message(format!(" ({} cache hits)", num_cache_hits));
+                            }
                         }
 
                         progress.inc(1);
@@ -153,7 +152,6 @@ impl FileHasher {
             }
         });
         progress.finish();
-        log::info!("Hashed {} files ({} cache hits).", hashed_count, cache_hits);
 
         let mut duplicates = Vec::new();
         for (_, mut dupes) in by_hash {

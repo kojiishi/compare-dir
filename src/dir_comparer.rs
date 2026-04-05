@@ -130,7 +130,8 @@ impl DirectoryComparer {
         let progress = ProgressBar::new_spinner();
         progress.enable_steady_tick(std::time::Duration::from_millis(120));
         progress.set_style(
-            ProgressStyle::with_template("[{elapsed_precise}] {spinner:.green} {msg}").unwrap(),
+            ProgressStyle::with_template("[{elapsed_precise}] {spinner:.green} {pos:>7} {msg}")
+                .unwrap(),
         );
         progress.set_message("Scanning directories...");
         let start_time = std::time::Instant::now();
