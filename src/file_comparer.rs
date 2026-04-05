@@ -146,30 +146,31 @@ impl FileComparisonResult {
     }
 
     pub fn to_symbol_string(&self) -> String {
-        let c1 = match self.classification {
-            Classification::OnlyInDir1 => '>',
-            Classification::OnlyInDir2 => '<',
-            Classification::InBoth => '=',
-        };
-        let c2 = match self.modified_time_comparison {
-            None => ' ',
-            Some(Ordering::Greater) => '>',
-            Some(Ordering::Less) => '<',
-            Some(Ordering::Equal) => '=',
-        };
-        let c3 = match self.size_comparison {
-            None => ' ',
-            Some(Ordering::Greater) => '>',
-            Some(Ordering::Less) => '<',
-            Some(Ordering::Equal) => {
-                if self.is_content_same == Some(false) {
-                    '!'
-                } else {
-                    '='
+        String::from_iter([
+            match self.classification {
+                Classification::OnlyInDir1 => '>',
+                Classification::OnlyInDir2 => '<',
+                Classification::InBoth => '=',
+            },
+            match self.modified_time_comparison {
+                None => ' ',
+                Some(Ordering::Greater) => '>',
+                Some(Ordering::Less) => '<',
+                Some(Ordering::Equal) => '=',
+            },
+            match self.size_comparison {
+                None => ' ',
+                Some(Ordering::Greater) => '>',
+                Some(Ordering::Less) => '<',
+                Some(Ordering::Equal) => {
+                    if self.is_content_same == Some(false) {
+                        '!'
+                    } else {
+                        '='
+                    }
                 }
-            }
-        };
-        format!("{}{}{}", c1, c2, c3)
+            },
+        ])
     }
 
     pub fn to_string(&self, dir1_name: &str, dir2_name: &str) -> String {
