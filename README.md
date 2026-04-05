@@ -11,10 +11,14 @@
 
 # compare-dir
 
-Compare two directories and show the differences, or find duplicated files within a single directory.
+A command line tool to compare two directories and show the differences.
+It can also find duplicated files within a single directory.
 
-* For two directories, it compares the file contents if the file sizes are the same. Useful to verify backup copies.
-* For a single directory, it cryptographically hashes matching file sizes to discover exact duplicates.
+* For two directories, it compares the modified time and sizes.
+  It also compares file contents if the file sizes are the same.
+  Useful to verify backup copies.
+* For a single directory, it discovers exact duplicates
+  by finding matches of file sizes and hashes.
 
 ## Installation
 
