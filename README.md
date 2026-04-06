@@ -117,17 +117,24 @@ Hash conflicts are unlikely, but `-c full` can help to double check.
 File hashes are saved to a file named `.hash_cache`
 to make subsequent runs faster.
 
+> [!NOTE]
+> When backing up,
+> do not copy `.hash_cache`
+> if you intend to use this tool
+> to verify backup copies.
+
 If file contents are changed without changing their modified time,
 the cache needs to be invalidated.
 You can invalidate the hash cache
 by the `-c rehash` option,
 or by deleting the cache file.
 
-> [!NOTE]
-> When backing up,
-> do not copy `.hash_cache`
-> if you intend to use this tool
-> to verify backup copies.
+```shell_session
+% compare-dir /master /backup
+==! dir1/dir2/file
+% cp /master/dir1/dir2/file /backup/dir1/dir2
+% compare-dir -c rehash /master/dir1/dir2 /backup/dir1/dir2
+```
 
 ### Hash Cache Directory
 
