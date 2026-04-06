@@ -227,21 +227,7 @@ impl DirectoryComparer {
         let mut next1 = Self::get_next_file(&mut it1, &self.dir1);
         let mut next2 = Self::get_next_file(&mut it2, &self.dir2);
         let mut index = 0;
-        let hashers = if self.comparison_method == FileComparisonMethod::Hash
-            || self.comparison_method == FileComparisonMethod::Rehash
-        {
-            let (h1, h2) = rayon::join(
-                || FileHasher::new(self.dir1.clone()),
-                || FileHasher::new(self.dir2.clone()),
-            );
-            if self.comparison_method == FileComparisonMethod::Rehash {
-                h1.clear_cache()?;
-                h2.clear_cache()?;
-            }
-            Some((h1, h2))
-        } else {
-            None
-        };
+        let hashers = self.get_hashers()?;
         tx.send(CompareProgress::StartOfComparison)?;
         rayon::scope(|scope| {
             loop {
@@ -301,11 +287,7 @@ impl DirectoryComparer {
             }
             tx.send(CompareProgress::TotalFiles(index))
         })?;
-        if let Some((h1, h2)) = hashers {
-            let (r1, r2) = rayon::join(|| h1.save_cache(), || h2.save_cache());
-            r1?;
-            r2?;
-        }
+        Self::save_hashers(hashers)?;
         Ok(())
     }
 
@@ -324,6 +306,33 @@ impl DirectoryComparer {
             }
         }
         None
+    }
+
+    fn get_hashers(&self) -> anyhow::Result<Option<(FileHasher, FileHasher)>> {
+        if self.comparison_method == FileComparisonMethod::Hash
+            || self.comparison_method == FileComparisonMethod::Rehash
+        {
+            let (h1, h2) = rayon::join(
+                || FileHasher::new(self.dir1.clone()),
+                || FileHasher::new(self.dir2.clone()),
+            );
+            if self.comparison_method == FileComparisonMethod::Rehash {
+                h1.clear_cache()?;
+                h2.clear_cache()?;
+            }
+            Ok(Some((h1, h2)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn save_hashers(hashers: Option<(FileHasher, FileHasher)>) -> anyhow::Result<()> {
+        if let Some((h1, h2)) = hashers {
+            let (r1, r2) = rayon::join(|| h1.save_cache(), || h2.save_cache());
+            r1?;
+            r2?;
+        }
+        Ok(())
     }
 }
 
