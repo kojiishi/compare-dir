@@ -134,8 +134,16 @@ or by deleting the cache file.
 % compare-dir /master /backup
 dir1/dir2/file: Contents differ
 % cp /master/dir1/dir2/file /backup/dir1/dir2
-% compare-dir -c rehash /master/dir1/dir2 /backup/dir1/dir2
+% compare-dir -c rehash /master/dir1/dir2/file /backup/dir1/dir2
 ```
+
+> [!NOTE]
+> When the first argument is a file, not a directory,
+> only the specified file is compared.
+> The `-c rehash` option in this mode
+> invalidates the hash cache only for the file,
+> retaining hash caches for other files in the directory
+> and its sub directories.
 
 ### Hash Cache Directory
 [Hash Cache Directory]: #hash-cache-directory

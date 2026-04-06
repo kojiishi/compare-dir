@@ -100,6 +100,11 @@ impl FileHashCache {
         state.is_dirty = true;
     }
 
+    pub fn remove(&self, path: &Path) -> Option<Hash> {
+        let mut state = self.state.lock().unwrap();
+        state.entries.remove(path).map(|entry| entry.hash)
+    }
+
     /// Clears all entries from the cache and marks it as dirty.
     pub fn clear(&self, path: &Path) {
         let mut state = self.state.lock().unwrap();

@@ -44,6 +44,13 @@ impl FileHasher {
         }
     }
 
+    /// Remove a cache entry if it exists.
+    pub fn remove_cache_entry(&self, path: &Path) -> anyhow::Result<()> {
+        let relative = path.strip_prefix(self.cache.base_dir())?;
+        self.cache.remove(relative);
+        Ok(())
+    }
+
     /// Save the hash cache if it is dirty.
     pub fn save_cache(&self) -> anyhow::Result<()> {
         Ok(self.cache.save()?)

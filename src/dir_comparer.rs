@@ -127,6 +127,10 @@ impl DirectoryComparer {
     /// Executes the directory comparison and prints results to stdout.
     /// This is a convenience method for CLI usage.
     pub fn run(&self) -> anyhow::Result<()> {
+        if self.dir1.is_file() {
+            return self.run_file_comparer();
+        }
+
         let progress = ProgressReporter::new();
         progress.set_message("Scanning directories...");
         let start_time = std::time::Instant::now();
@@ -226,8 +230,14 @@ impl DirectoryComparer {
         let mut it2 = WalkDir::new(&self.dir2).sort_by_file_name().into_iter();
         let mut next1 = Self::get_next_file(&mut it1, &self.dir1);
         let mut next2 = Self::get_next_file(&mut it2, &self.dir2);
+        let hashers = self.get_hashers(&self.dir1, &self.dir2)?;
+        if self.comparison_method == FileComparisonMethod::Rehash
+            && let Some((h1, h2)) = &hashers
+        {
+            h1.clear_cache()?;
+            h2.clear_cache()?;
+        }
         let mut index = 0;
-        let hashers = self.get_hashers()?;
         tx.send(CompareProgress::StartOfComparison)?;
         rayon::scope(|scope| {
             loop {
@@ -308,22 +318,21 @@ impl DirectoryComparer {
         None
     }
 
-    fn get_hashers(&self) -> anyhow::Result<Option<(FileHasher, FileHasher)>> {
+    fn get_hashers(
+        &self,
+        dir1: &Path,
+        dir2: &Path,
+    ) -> anyhow::Result<Option<(FileHasher, FileHasher)>> {
         if self.comparison_method == FileComparisonMethod::Hash
             || self.comparison_method == FileComparisonMethod::Rehash
         {
             let (h1, h2) = rayon::join(
-                || FileHasher::new(self.dir1.clone()),
-                || FileHasher::new(self.dir2.clone()),
+                || FileHasher::new(dir1.to_path_buf()),
+                || FileHasher::new(dir2.to_path_buf()),
             );
-            if self.comparison_method == FileComparisonMethod::Rehash {
-                h1.clear_cache()?;
-                h2.clear_cache()?;
-            }
-            Ok(Some((h1, h2)))
-        } else {
-            Ok(None)
+            return Ok(Some((h1, h2)));
         }
+        Ok(None)
     }
 
     fn save_hashers(hashers: Option<(FileHasher, FileHasher)>) -> anyhow::Result<()> {
@@ -332,6 +341,41 @@ impl DirectoryComparer {
             r1?;
             r2?;
         }
+        Ok(())
+    }
+
+    fn run_file_comparer(&self) -> anyhow::Result<()> {
+        assert!(self.dir1.is_file());
+        let file1 = &self.dir1;
+        let dir1 = file1.parent().unwrap();
+        let file1_name = file1.file_name().unwrap();
+        let (dir2, file2) = if self.dir2.is_file() {
+            (self.dir2.parent().unwrap(), self.dir2.clone())
+        } else {
+            (self.dir2.as_path(), self.dir2.join(file1_name))
+        };
+
+        let mut comparer = FileComparer::new(file1, &file2);
+        comparer.buffer_size = self.buffer_size;
+        let hashers = self.get_hashers(dir1, dir2)?;
+        if let Some((h1, h2)) = &hashers {
+            if self.comparison_method == FileComparisonMethod::Rehash {
+                h1.remove_cache_entry(file1)?;
+                h2.remove_cache_entry(&file2)?;
+            }
+            comparer.hashers = Some((h1, h2));
+        }
+        let mut result = FileComparisonResult::new(PathBuf::new(), Classification::InBoth);
+        let should_compare_content = self.comparison_method != FileComparisonMethod::Size;
+        result.update(&comparer, should_compare_content)?;
+        let file1_str = file1.to_str().unwrap_or("file1");
+        if self.is_symbols_format {
+            println!("{} {}", result.to_symbol_string(), file1_str);
+        } else {
+            let file2_str = file2.to_str().unwrap_or("file2");
+            println!("{}: {}", file1_str, result.to_string(file1_str, file2_str));
+        }
+        Self::save_hashers(hashers)?;
         Ok(())
     }
 }
