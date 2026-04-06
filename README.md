@@ -119,9 +119,10 @@ to make subsequent runs faster.
 
 > [!NOTE]
 > When backing up,
-> do not copy `.hash_cache`
 > if you intend to use this tool
-> to verify backup copies.
+> to verify backup copies,
+> do not copy `.hash_cache`.
+> Also see [hash cache directory].
 
 If file contents are changed without changing their modified time,
 the cache needs to be invalidated.
@@ -131,24 +132,28 @@ or by deleting the cache file.
 
 ```shell_session
 % compare-dir /master /backup
-==! dir1/dir2/file
+dir1/dir2/file: Contents differ
 % cp /master/dir1/dir2/file /backup/dir1/dir2
 % compare-dir -c rehash /master/dir1/dir2 /backup/dir1/dir2
 ```
 
 ### Hash Cache Directory
+[Hash Cache Directory]: #hash-cache-directory
 
-The directory to create the cache is determined by following steps:
-1. Find `.hash_cache` in the specified directory.
-2. If not found, try to find it in its ancestor directories.
-3. If not found, create it in the specified directory.
+You can create the hash cache file
+in one of parent directories.
+`compare-dir` searches the `.hash_cache`
+in the specified directory and its ancestors.
+If not found, it creates it in the specified directory.
 
-You can create the cache file in one of ancestor directories.
-This is useful if you may want to run the tool for the parent directory.
+This is useful if you may want to run the tool
+for parent directories in future.
 For example:
 ```bash
 touch ~/data/.hash_cache
 compare-dir ~/data/subdir
+compare-dir ~/data/subdir2
+compare-dir ~/data
 ```
-Then `~/data/.hash_cache` is used as the cache file,
-instead of `~/data/subdir/.hash_cache`.
+All three runs of `compare-dir` use
+the same hash cache file `~/data/.hash_cache`.
