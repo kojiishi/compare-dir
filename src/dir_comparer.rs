@@ -9,6 +9,7 @@ use walkdir::WalkDir;
 #[derive(Debug, Clone)]
 enum CompareProgress {
     StartOfComparison,
+    FileDone,
     TotalFiles(usize),
     Result(usize, FileComparisonResult),
 }
@@ -169,8 +170,8 @@ impl DirectoryComparer {
                                 );
                             });
                         }
-                        progress.inc(1);
                     }
+                    CompareProgress::FileDone => progress.inc(1),
                 }
             }
         });
@@ -189,7 +190,7 @@ impl DirectoryComparer {
         let (tx_unordered, rx_unordered) = mpsc::channel();
         std::thread::scope(|scope| {
             scope.spawn(move || {
-                if let Err(e) = self.compare_streaming(tx_unordered) {
+                if let Err(e) = self.compare_streaming_unordered(tx_unordered) {
                     log::error!("Error during unordered comparison: {}", e);
                 }
             });
@@ -215,11 +216,10 @@ impl DirectoryComparer {
             }
             Ok::<(), anyhow::Error>(())
         })?;
-
         Ok(())
     }
 
-    fn compare_streaming(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
+    fn compare_streaming_unordered(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
         log::info!("Scanning directory: {:?}", self.dir1);
         let mut it1 = WalkDir::new(&self.dir1).sort_by_file_name().into_iter();
         log::info!("Scanning directory: {:?}", self.dir2);
@@ -256,6 +256,7 @@ impl DirectoryComparer {
                         let (rel1, _) = next1.take().unwrap();
                         let result = FileComparisonResult::new(rel1, Classification::OnlyInDir1);
                         tx.send(CompareProgress::Result(index, result))?;
+                        tx.send(CompareProgress::FileDone)?;
                         index += 1;
                         next1 = Self::get_next_file(&mut it1, &self.dir1);
                     }
@@ -263,6 +264,7 @@ impl DirectoryComparer {
                         let (rel2, _) = next2.take().unwrap();
                         let result = FileComparisonResult::new(rel2, Classification::OnlyInDir2);
                         tx.send(CompareProgress::Result(index, result))?;
+                        tx.send(CompareProgress::FileDone)?;
                         index += 1;
                         next2 = Self::get_next_file(&mut it2, &self.dir2);
                     }
@@ -285,11 +287,10 @@ impl DirectoryComparer {
                             if let Err(error) = result.update(&comparer, should_compare) {
                                 log::error!("Error during comparison of {:?}: {}", rel_path, error);
                             }
-                            if tx_clone.send(CompareProgress::Result(i, result)).is_err() {
-                                log::error!(
-                                    "Receiver dropped, stopping comparison of {:?}",
-                                    rel_path
-                                );
+                            if tx_clone.send(CompareProgress::Result(i, result)).is_err()
+                                || tx_clone.send(CompareProgress::FileDone).is_err()
+                            {
+                                log::error!("Send failed during comparison of {:?}", rel_path);
                             }
                         });
                         index += 1;
