@@ -6,13 +6,14 @@ pub struct ProgressReporter {
 }
 
 impl ProgressReporter {
+    const INITIAL_STYLE: &str = "[{elapsed_precise}] {spinner:.green} {pos:>7} {msg}";
+    const NORMAL_STYLE: &str =
+        "[{elapsed_precise}] {bar:40.cyan/blue} {percent}% {pos:>7}/{len:7} {msg}";
+
     pub fn new() -> Self {
         let progress = ProgressBar::new_spinner();
         progress.enable_steady_tick(Duration::from_millis(120));
-        progress.set_style(
-            ProgressStyle::with_template("[{elapsed_precise}] {spinner:.green} {pos:>7} {msg}")
-                .unwrap(),
-        );
+        progress.set_style(ProgressStyle::with_template(Self::INITIAL_STYLE).unwrap());
         Self { progress }
     }
 
@@ -31,12 +32,8 @@ impl ProgressReporter {
     pub fn set_length(&self, len: u64) {
         self.progress.set_length(len);
         if len > 0 {
-            self.progress.set_style(
-                ProgressStyle::with_template(
-                    "[{elapsed_precise}] {bar:40.cyan/blue} {percent}% {pos:>7}/{len:7} {msg}",
-                )
-                .unwrap(),
-            );
+            self.progress
+                .set_style(ProgressStyle::with_template(Self::NORMAL_STYLE).unwrap());
         }
     }
 
