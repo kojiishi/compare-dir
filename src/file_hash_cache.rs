@@ -15,6 +15,7 @@ pub struct CacheEntry {
 struct CacheState {
     entries: HashMap<PathBuf, CacheEntry>,
     is_dirty: bool,
+    merged_child_caches: Vec<PathBuf>,
 }
 
 pub struct FileHashCache {
@@ -43,6 +44,7 @@ impl FileHashCache {
             state: Mutex::new(CacheState {
                 entries,
                 is_dirty: false,
+                merged_child_caches: Vec::new(),
             }),
         });
         map.insert(dir.to_path_buf(), cache.clone());
@@ -81,6 +83,40 @@ impl FileHashCache {
     /// Gets the base directory for this cache instance.
     pub fn base_dir(&self) -> &Path {
         &self.base_dir
+    }
+
+    /// Merges all entries from another cache into `self`.
+    /// If both maps have an entry for a path, `self` wins.
+    pub fn merge(&self, other: &Self) {
+        assert!(!std::ptr::eq(self, other), "Cannot merge cache with itself");
+        let rel_prefix = other
+            .base_dir
+            .strip_prefix(&self.base_dir)
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Cannot merge cache from {:?} into {:?}",
+                    other.base_dir, self.base_dir
+                )
+            });
+        let mut state = self.state.lock().unwrap();
+        let num_entries_before = state.entries.len();
+        let other_state = other.state.lock().unwrap();
+        for (rel_path, entry) in other_state.entries.iter() {
+            let adjusted_path = rel_prefix.join(rel_path);
+            if let std::collections::hash_map::Entry::Vacant(e) = state.entries.entry(adjusted_path)
+            {
+                e.insert(entry.clone());
+                state.is_dirty = true;
+            }
+        }
+        log::info!(
+            "Merged {} entries from {:?} into {:?}",
+            state.entries.len() - num_entries_before,
+            other.base_dir,
+            self.base_dir,
+        );
+
+        state.merged_child_caches.push(other.base_dir.clone());
     }
 
     /// Retrieves an entry's hash from the cache if the modified time matches.
@@ -127,10 +163,14 @@ impl FileHashCache {
     /// Writes the cache out to `<base_dir>/.hashes` if there are dirty changes.
     pub fn save(&self) -> io::Result<()> {
         let mut state = self.state.lock().unwrap();
-        if !state.is_dirty {
-            return Ok(());
+        if state.is_dirty {
+            self.save_entries(&mut state)?;
         }
+        self.cleanup_merged_caches(&mut state);
+        Ok(())
+    }
 
+    fn save_entries(&self, state: &mut CacheState) -> io::Result<()> {
         let start_time = std::time::Instant::now();
         let temp_path = self.base_dir.join(Self::TMP_FILE_NAME);
         let mut file = File::create(&temp_path)?;
@@ -145,9 +185,7 @@ impl FileHashCache {
 
         let path = self.base_dir.join(Self::FILE_NAME);
         std::fs::rename(&temp_path, &path)?;
-
         state.is_dirty = false;
-
         log::info!(
             "Saved {} hashes to {:?} in {:?}",
             state.entries.len(),
@@ -155,6 +193,23 @@ impl FileHashCache {
             start_time.elapsed()
         );
         Ok(())
+    }
+
+    fn cleanup_merged_caches(&self, state: &mut CacheState) {
+        let child_caches = std::mem::take(&mut state.merged_child_caches);
+        for child_dir in child_caches {
+            let child_cache_path = child_dir.join(Self::FILE_NAME);
+            if child_cache_path.is_file() {
+                log::info!("Removing child cache {:?}", child_cache_path);
+                if let Err(error) = std::fs::remove_file(&child_cache_path) {
+                    log::warn!(
+                        "Failed to remove child cache {:?}: {:?}",
+                        child_cache_path,
+                        error
+                    );
+                }
+            }
+        }
     }
 
     fn load_cache(dir: &Path) -> HashMap<PathBuf, CacheEntry> {
@@ -406,6 +461,94 @@ mod tests {
         let output = String::from_utf8(buf)?;
         let expected = format!("{} 12345 67800 test.txt\n", hash_hex);
         assert_eq!(output, expected);
+        Ok(())
+    }
+    #[test]
+    fn test_merge() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let subdir = dir.path().join("sub");
+        std::fs::create_dir(&subdir)?;
+
+        let parent_cache = FileHashCache::new(dir.path());
+        let child_cache = FileHashCache::new(&subdir);
+
+        let path1 = PathBuf::from("file1.txt");
+        let path2 = PathBuf::from("file2.txt");
+        let modified = SystemTime::now();
+        let hash1 =
+            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
+        let hash2 =
+            Hash::from_hex("ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100")?;
+
+        parent_cache.insert(&path1, modified, hash1);
+        child_cache.insert(&path2, modified, hash2);
+
+        parent_cache.merge(&child_cache);
+
+        // Verify parent has both
+        assert!(parent_cache.get(&path1, modified).is_some());
+
+        let adjusted_path2 = PathBuf::from("sub").join(&path2);
+        let retrieved_hash2 = parent_cache.get(&adjusted_path2, modified);
+        assert_eq!(retrieved_hash2, Some(hash2));
+
+        // Verify child cache path is in merged_child_caches
+        {
+            let state = parent_cache.state.lock().unwrap();
+            assert_eq!(state.merged_child_caches.len(), 1);
+            assert_eq!(state.merged_child_caches[0], subdir);
+        }
+
+        // Test "self wins" on conflict
+        let hash_conflict =
+            Hash::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")?;
+        child_cache.insert(&path2, modified, hash_conflict);
+
+        parent_cache.merge(&child_cache);
+
+        let retrieved = parent_cache.get(&adjusted_path2, modified);
+        assert_eq!(retrieved, Some(hash2));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_save_cleans_up_child_cache_even_if_not_dirty() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let subdir = dir.path().join("sub");
+        std::fs::create_dir(&subdir)?;
+
+        let parent_cache = FileHashCache::new(dir.path());
+        let child_cache = FileHashCache::new(&subdir);
+
+        let path = PathBuf::from("file.txt");
+        let modified = SystemTime::now();
+        let hash =
+            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
+
+        child_cache.insert(&path, modified, hash);
+        child_cache.save()?;
+
+        let child_cache_path = subdir.join(FileHashCache::FILE_NAME);
+        assert!(child_cache_path.is_file());
+
+        parent_cache.insert(&PathBuf::from("sub").join(&path), modified, hash);
+        parent_cache.save()?;
+
+        assert!(!parent_cache.state.lock().unwrap().is_dirty);
+
+        parent_cache.merge(&child_cache);
+
+        assert!(!parent_cache.state.lock().unwrap().is_dirty);
+        assert_eq!(
+            parent_cache.state.lock().unwrap().merged_child_caches.len(),
+            1
+        );
+
+        parent_cache.save()?;
+
+        assert!(!child_cache_path.exists());
+
         Ok(())
     }
 }

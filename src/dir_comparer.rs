@@ -228,17 +228,22 @@ impl DirectoryComparer {
         let mut it1 = FileIterator::new(self.dir1.clone());
         let mut it2 = FileIterator::new(self.dir2.clone());
         let hashers = self.get_hashers(&self.dir1, &self.dir2)?;
-        if self.comparison_method == FileComparisonMethod::Rehash
-            && let Some((h1, h2)) = &hashers
-        {
-            h1.clear_cache()?;
-            h2.clear_cache()?;
+        if let Some((h1, h2)) = &hashers {
+            it1.hasher = Some(h1);
+            it2.hasher = Some(h2);
+            if self.comparison_method == FileComparisonMethod::Rehash {
+                h1.clear_cache()?;
+                h2.clear_cache()?;
+            }
         }
+
+        let mut cur1 = it1.next();
+        let mut cur2 = it2.next();
         let mut index = 0;
         tx.send(CompareProgress::StartOfComparison)?;
         rayon::scope(|scope| {
             loop {
-                let cmp = match (&it1.current, &it2.current) {
+                let cmp = match (&cur1, &cur2) {
                     (Some((rel1, _)), Some((rel2, _))) => rel1.cmp(rel2),
                     (Some(_), None) => Ordering::Less,
                     (None, Some(_)) => Ordering::Greater,
@@ -246,24 +251,24 @@ impl DirectoryComparer {
                 };
                 match cmp {
                     Ordering::Less => {
-                        let (rel1, _) = it1.current.take().unwrap();
+                        let (rel1, _) = cur1.take().unwrap();
                         let result = FileComparisonResult::new(rel1, Classification::OnlyInDir1);
                         tx.send(CompareProgress::Result(index, result))?;
                         tx.send(CompareProgress::FileDone)?;
                         index += 1;
-                        it1.advance();
+                        cur1 = it1.next();
                     }
                     Ordering::Greater => {
-                        let (rel2, _) = it2.current.take().unwrap();
+                        let (rel2, _) = cur2.take().unwrap();
                         let result = FileComparisonResult::new(rel2, Classification::OnlyInDir2);
                         tx.send(CompareProgress::Result(index, result))?;
                         tx.send(CompareProgress::FileDone)?;
                         index += 1;
-                        it2.advance();
+                        cur2 = it2.next();
                     }
                     Ordering::Equal => {
-                        let (rel_path, path1) = it1.current.take().unwrap();
-                        let (_, path2) = it2.current.take().unwrap();
+                        let (rel_path, path1) = cur1.take().unwrap();
+                        let (_, path2) = cur2.take().unwrap();
                         let buffer_size = self.buffer_size;
                         let tx_clone = tx.clone();
                         let i = index;
@@ -287,8 +292,8 @@ impl DirectoryComparer {
                             }
                         });
                         index += 1;
-                        it1.advance();
-                        it2.advance();
+                        cur1 = it1.next();
+                        cur2 = it2.next();
                     }
                 }
             }

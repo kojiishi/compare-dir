@@ -54,6 +54,11 @@ impl FileHasher {
         Ok(self.cache.save()?)
     }
 
+    /// Merges another cache into this hasher's cache.
+    pub(crate) fn merge_cache(&self, other_cache: &FileHashCache) {
+        self.cache.merge(other_cache);
+    }
+
     /// Clears the loaded hashes in the cache.
     pub fn clear_cache(&self) -> anyhow::Result<()> {
         let relative = self.dir.strip_prefix(self.cache.base_dir())?;
@@ -162,8 +167,8 @@ impl FileHasher {
 
         rayon::scope(|scope| -> anyhow::Result<()> {
             let mut it = FileIterator::new(self.dir.clone());
-            while it.current.is_some() {
-                let (_, current_path) = it.current.take().unwrap();
+            it.hasher = Some(self);
+            for (_, current_path) in it {
                 let meta = fs::metadata(&current_path)?;
                 let size = meta.len();
                 let modified = meta.modified()?;
@@ -192,7 +197,6 @@ impl FileHasher {
                         vac.insert(EntryState::Single(current_path, modified));
                     }
                 }
-                it.advance();
             }
             tx.send(HashProgress::TotalFiles(total_hashed))?;
             Ok(())
