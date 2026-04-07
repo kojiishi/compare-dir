@@ -1,12 +1,15 @@
 mod dir_comparer;
 mod file_comparer;
-pub(crate) mod file_hash_cache;
+mod file_hash_cache;
 mod file_hasher;
+mod file_iterator;
 mod progress_reporter;
 
 pub use dir_comparer::{DirectoryComparer, FileComparisonMethod};
 pub use file_comparer::{Classification, FileComparer, FileComparisonResult};
+pub(crate) use file_hash_cache::FileHashCache;
 pub use file_hasher::{DuplicatedFiles, FileHasher};
+pub(crate) use file_iterator::FileIterator;
 pub(crate) use progress_reporter::ProgressReporter;
 
 pub(crate) fn human_readable_size(size: u64) -> String {

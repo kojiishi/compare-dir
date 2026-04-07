@@ -1,10 +1,11 @@
-use crate::{Classification, FileComparer, FileComparisonResult, FileHasher, ProgressReporter};
+use crate::{
+    Classification, FileComparer, FileComparisonResult, FileHasher, FileIterator, ProgressReporter,
+};
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
 enum CompareProgress {
@@ -224,12 +225,8 @@ impl DirectoryComparer {
     }
 
     fn compare_streaming_unordered(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
-        log::info!("Scanning directory: {:?}", self.dir1);
-        let mut it1 = WalkDir::new(&self.dir1).sort_by_file_name().into_iter();
-        log::info!("Scanning directory: {:?}", self.dir2);
-        let mut it2 = WalkDir::new(&self.dir2).sort_by_file_name().into_iter();
-        let mut next1 = Self::get_next_file(&mut it1, &self.dir1);
-        let mut next2 = Self::get_next_file(&mut it2, &self.dir2);
+        let mut it1 = FileIterator::new(self.dir1.clone());
+        let mut it2 = FileIterator::new(self.dir2.clone());
         let hashers = self.get_hashers(&self.dir1, &self.dir2)?;
         if self.comparison_method == FileComparisonMethod::Rehash
             && let Some((h1, h2)) = &hashers
@@ -241,7 +238,7 @@ impl DirectoryComparer {
         tx.send(CompareProgress::StartOfComparison)?;
         rayon::scope(|scope| {
             loop {
-                let cmp = match (&next1, &next2) {
+                let cmp = match (&it1.current, &it2.current) {
                     (Some((rel1, _)), Some((rel2, _))) => rel1.cmp(rel2),
                     (Some(_), None) => Ordering::Less,
                     (None, Some(_)) => Ordering::Greater,
@@ -249,24 +246,24 @@ impl DirectoryComparer {
                 };
                 match cmp {
                     Ordering::Less => {
-                        let (rel1, _) = next1.take().unwrap();
+                        let (rel1, _) = it1.current.take().unwrap();
                         let result = FileComparisonResult::new(rel1, Classification::OnlyInDir1);
                         tx.send(CompareProgress::Result(index, result))?;
                         tx.send(CompareProgress::FileDone)?;
                         index += 1;
-                        next1 = Self::get_next_file(&mut it1, &self.dir1);
+                        it1.advance();
                     }
                     Ordering::Greater => {
-                        let (rel2, _) = next2.take().unwrap();
+                        let (rel2, _) = it2.current.take().unwrap();
                         let result = FileComparisonResult::new(rel2, Classification::OnlyInDir2);
                         tx.send(CompareProgress::Result(index, result))?;
                         tx.send(CompareProgress::FileDone)?;
                         index += 1;
-                        next2 = Self::get_next_file(&mut it2, &self.dir2);
+                        it2.advance();
                     }
                     Ordering::Equal => {
-                        let (rel_path, path1) = next1.take().unwrap();
-                        let (_, path2) = next2.take().unwrap();
+                        let (rel_path, path1) = it1.current.take().unwrap();
+                        let (_, path2) = it2.current.take().unwrap();
                         let buffer_size = self.buffer_size;
                         let tx_clone = tx.clone();
                         let i = index;
@@ -290,8 +287,8 @@ impl DirectoryComparer {
                             }
                         });
                         index += 1;
-                        next1 = Self::get_next_file(&mut it1, &self.dir1);
-                        next2 = Self::get_next_file(&mut it2, &self.dir2);
+                        it1.advance();
+                        it2.advance();
                     }
                 }
             }
@@ -299,23 +296,6 @@ impl DirectoryComparer {
         })?;
         Self::save_hashers(hashers)?;
         Ok(())
-    }
-
-    fn get_next_file(it: &mut walkdir::IntoIter, dir: &Path) -> Option<(PathBuf, PathBuf)> {
-        for entry in it {
-            match entry {
-                Ok(entry) => {
-                    if entry.file_type().is_file() {
-                        let rel_path = entry.path().strip_prefix(dir).unwrap();
-                        return Some((rel_path.to_path_buf(), entry.path().to_path_buf()));
-                    }
-                }
-                Err(error) => {
-                    log::error!("Error while walking directory: {}", error);
-                }
-            }
-        }
-        None
     }
 
     fn get_hashers(

@@ -1,11 +1,9 @@
-use crate::ProgressReporter;
-use crate::file_hash_cache::FileHashCache;
+use crate::{FileHashCache, FileIterator, ProgressReporter};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
-use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
 enum HashProgress {
@@ -163,17 +161,15 @@ impl FileHasher {
         let mut total_hashed = 0;
 
         rayon::scope(|scope| -> anyhow::Result<()> {
-            for entry in WalkDir::new(&self.dir).into_iter().filter_map(|e| e.ok()) {
-                if !entry.file_type().is_file() {
-                    continue;
-                }
-                let meta = entry.metadata()?;
+            let mut it = FileIterator::new(self.dir.clone());
+            while it.current.is_some() {
+                let (_, current_path) = it.current.take().unwrap();
+                let meta = fs::metadata(&current_path)?;
                 let size = meta.len();
                 let modified = meta.modified()?;
+
                 // Small optimization: If file size is 0, it's not really worth treating
                 // as wasted space duplicates in the same way, but keeping it unified for now.
-                let current_path = entry.path().to_path_buf();
-
                 match by_size.entry(size) {
                     std::collections::hash_map::Entry::Occupied(mut occ) => match occ.get_mut() {
                         EntryState::Single(first_path, first_modified) => {
@@ -196,6 +192,7 @@ impl FileHasher {
                         vac.insert(EntryState::Single(current_path, modified));
                     }
                 }
+                it.advance();
             }
             tx.send(HashProgress::TotalFiles(total_hashed))?;
             Ok(())
