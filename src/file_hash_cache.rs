@@ -31,6 +31,7 @@ impl FileHashCache {
 
     /// Creates a new cache instance or returns an existing one for the specified directory.
     pub fn new(dir: &Path) -> Arc<Self> {
+        assert!(dir.is_absolute());
         let mut map = GLOBAL_CACHES.lock().unwrap();
         if let Some(cache) = map.get(dir) {
             return cache.clone();
@@ -52,6 +53,7 @@ impl FileHashCache {
     /// If an existing cache is found, returns that cache instance.
     /// If no cache is found in the current directory or ancestors, creates a new one in `dir`.
     pub fn find_or_new(dir: &Path) -> Arc<Self> {
+        assert!(dir.is_absolute());
         let cache_dir = Self::find_cache_dir(dir);
         Self::new(cache_dir)
     }
@@ -59,6 +61,7 @@ impl FileHashCache {
     /// Traverses the directory and its ancestors to find an existing cache file.
     /// Locks the global cache once during traversal.
     fn find_cache_dir(dir: &Path) -> &Path {
+        assert!(dir.is_absolute());
         let map = GLOBAL_CACHES.lock().unwrap();
         let mut current = dir;
         loop {
@@ -82,6 +85,7 @@ impl FileHashCache {
 
     /// Retrieves an entry's hash from the cache if the modified time matches.
     pub fn get(&self, path: &Path, modified: SystemTime) -> Option<Hash> {
+        assert!(path.is_relative());
         let state = self.state.lock().unwrap();
         if let Some(entry) = state.entries.get(path)
             && entry.modified == modified
@@ -93,6 +97,7 @@ impl FileHashCache {
 
     /// Inserts a hash into the cache for a given path and modified time.
     pub fn insert(&self, path: &Path, modified: SystemTime, hash: Hash) {
+        assert!(path.is_relative());
         let mut state = self.state.lock().unwrap();
         state
             .entries
@@ -101,12 +106,15 @@ impl FileHashCache {
     }
 
     pub fn remove(&self, path: &Path) -> Option<Hash> {
+        assert!(path.is_relative());
         let mut state = self.state.lock().unwrap();
+        state.is_dirty = true;
         state.entries.remove(path).map(|entry| entry.hash)
     }
 
     /// Clears all entries from the cache and marks it as dirty.
     pub fn clear(&self, path: &Path) {
+        assert!(path.is_relative());
         let mut state = self.state.lock().unwrap();
         if path.as_os_str().is_empty() {
             state.entries.clear();
