@@ -14,11 +14,18 @@
 A command line tool to compare two directories and show the differences.
 It can also find duplicated files within a single directory.
 
-* For two directories, it compares the modified time and sizes.
-  It also compares file contents if the file sizes are the same.
-  Useful to verify backup copies.
-* For a single directory, it discovers exact duplicates
-  by finding matches of file sizes and hashes.
+### Compare Directories
+
+In this mode,
+the tool compares two directories
+by comparing the modified time and sizes.
+It also compares file contents if the file sizes are the same.
+This mode is useful to verify backup copies.
+
+### Find Duplicates
+
+In this mode,
+the tool discovers exact duplicated files.
 
 ## Installation
 
@@ -86,18 +93,15 @@ To do this in PowerShell:
 compare-dir -s <dir1> <dir2> | sls '^..=' | %{$_ -replace '^....',''}
 ```
 
-## Hash
+## Compare Files
+[compare files]: #compare-files
 
-File hashes are used:
-* to compare file contents if file sizes are the same, and
-* to find duplicated files.
-
-When comparing two files,
+When comparing files,
 comparing byte-to-byte is faster
 if you compare them only once,
 but comparing hashes is faster
 if you compare them multiple times
-because hashes are cached in the [hash cache].
+because hashes are saved in the [hash cache].
 
 The `--compare` (or `-c`) option can change
 how files are compared.
@@ -109,7 +113,11 @@ how files are compared.
 | rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
 | full | Compare file contents byte-by-byte. |
 
-Hash conflicts are unlikely, but `-c full` can help to double check.
+## Hash
+
+File hashes are computed
+when comparing files (with the `-c hash` option),
+and when finding duplicates.
 
 ### Hash Cache
 [hash cache]: #hash-cache
@@ -122,14 +130,20 @@ to make subsequent runs faster.
 > if you intend to use this tool
 > to verify backup copies,
 > do not copy `.hash_cache`.
-> Also see [hash cache directory].
+> You can also create the `.hash_cache`
+> in the parent directory of the target directory.
+> See [hash cache directory].
 
 If file contents are changed without changing their modified time,
 the cache needs to be invalidated.
 You can invalidate the hash cache
-by the `-c rehash` option,
+by the [`-c rehash` option](#compare-files),
 or by deleting the cache file.
 
+The following example shows a scenario where
+a different content is found,
+make a backup copy,
+and rehash the cache.
 ```shell_session
 % compare-dir /master /backup
 dir1/dir2/file: Contents differ
@@ -148,20 +162,16 @@ dir1/dir2/file: Contents differ
 ### Hash Cache Directory
 [Hash Cache Directory]: #hash-cache-directory
 
-You can create the hash cache file
-in one of parent directories.
 `compare-dir` searches the `.hash_cache`
-in the specified directory and its ancestors.
+in the specified directory and its ancestor directories.
 If not found, it creates it in the specified directory.
 
-This is useful if you may want to run the tool
-for parent directories in future.
 For example:
 ```bash
-touch ~/data/.hash_cache
-compare-dir ~/data/subdir
-compare-dir ~/data/subdir2
-compare-dir ~/data
+touch /data/.hash_cache
+compare-dir /data/dir
+compare-dir /data/dir2
+compare-dir /data
 ```
 All three runs of `compare-dir` use
-the same hash cache file `~/data/.hash_cache`.
+the same hash cache file at `~/data/.hash_cache`.
