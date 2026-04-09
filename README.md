@@ -99,7 +99,7 @@ compare-dir -s <dir1> <dir2> | sls '^..=' | %{$_ -replace '^....',''}
 When comparing files,
 comparing byte-to-byte is faster
 if you compare them only once,
-but comparing hashes is faster
+but comparing [hashes](#hash) is faster
 if you compare them multiple times
 because hashes are saved in the [hash cache].
 
@@ -116,7 +116,8 @@ how files are compared.
 ## Hash
 
 File hashes are computed
-when comparing files (with the `-c hash` option),
+when comparing files
+(with the [`-c hash` option](#compare-files)),
 and when finding duplicates.
 
 ### Hash Cache
