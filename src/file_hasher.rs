@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 
 #[derive(Debug, Clone)]
@@ -29,6 +30,8 @@ pub struct FileHasher {
     dir: PathBuf,
     pub buffer_size: usize,
     cache: Arc<FileHashCache>,
+    pub(crate) num_hashed: AtomicUsize,
+    pub(crate) num_hash_looked_up: AtomicUsize,
 }
 
 impl FileHasher {
@@ -39,6 +42,8 @@ impl FileHasher {
             dir,
             buffer_size: crate::FileComparer::DEFAULT_BUFFER_SIZE,
             cache,
+            num_hashed: AtomicUsize::new(0),
+            num_hash_looked_up: AtomicUsize::new(0),
         }
     }
 
@@ -51,6 +56,12 @@ impl FileHasher {
 
     /// Save the hash cache if it is dirty.
     pub fn save_cache(&self) -> anyhow::Result<()> {
+        log::info!(
+            "Hash stats for {:?}: {} computed, {} looked up",
+            self.dir,
+            self.num_hashed.load(Ordering::Relaxed),
+            self.num_hash_looked_up.load(Ordering::Relaxed)
+        );
         Ok(self.cache.save()?)
     }
 
@@ -219,6 +230,7 @@ impl FileHasher {
             .strip_prefix(self.cache.base_dir())
             .expect("path should be in cache base_dir");
         if let Some(hash) = self.cache.get(relative, modified) {
+            self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
             let _ = tx.send(HashProgress::Result(path.to_path_buf(), size, hash, true));
             return;
         }
@@ -229,6 +241,7 @@ impl FileHasher {
         let cache_owned = self.cache.clone();
         scope.spawn(move |_| {
             if let Ok(hash) = Self::compute_hash(&path_owned, self.buffer_size) {
+                self.num_hashed.fetch_add(1, Ordering::Relaxed);
                 cache_owned.insert(&relative_owned, modified, hash);
                 let _ = tx_owned.send(HashProgress::Result(path_owned, size, hash, false));
             } else {
@@ -246,10 +259,12 @@ impl FileHasher {
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
         if let Some(hash) = self.cache.get(relative, modified) {
+            self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
             return Ok(hash);
         }
 
         let hash = Self::compute_hash(path, self.buffer_size)?;
+        self.num_hashed.fetch_add(1, Ordering::Relaxed);
         self.cache.insert(relative, modified, hash);
         Ok(hash)
     }
@@ -306,6 +321,9 @@ mod tests {
         let mut hasher = FileHasher::new(dir.path().to_path_buf());
         hasher.buffer_size = 8192;
         let duplicates = hasher.find_duplicates()?;
+
+        assert_eq!(hasher.num_hashed.load(Ordering::Relaxed), 2);
+        assert_eq!(hasher.num_hash_looked_up.load(Ordering::Relaxed), 0);
 
         assert_eq!(duplicates.len(), 1);
         let group = &duplicates[0];
