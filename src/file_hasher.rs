@@ -240,7 +240,7 @@ impl FileHasher {
         let tx_owned = tx.clone();
         let cache_owned = self.cache.clone();
         scope.spawn(move |_| {
-            if let Ok(hash) = Self::compute_hash(&path_owned, self.buffer_size) {
+            if let Ok(hash) = self.compute_hash(&path_owned) {
                 self.num_hashed.fetch_add(1, Ordering::Relaxed);
                 cache_owned.insert(&relative_owned, modified, hash);
                 let _ = tx_owned.send(HashProgress::Result(path_owned, size, hash, false));
@@ -263,24 +263,24 @@ impl FileHasher {
             return Ok(hash);
         }
 
-        let hash = Self::compute_hash(path, self.buffer_size)?;
+        let hash = self.compute_hash(path)?;
         self.num_hashed.fetch_add(1, Ordering::Relaxed);
         self.cache.insert(relative, modified, hash);
         Ok(hash)
     }
 
-    fn compute_hash(path: &Path, buffer_size: usize) -> io::Result<blake3::Hash> {
+    fn compute_hash(&self, path: &Path) -> io::Result<blake3::Hash> {
         let start_time = std::time::Instant::now();
         let mut f = fs::File::open(path)?;
         let mut hasher = blake3::Hasher::new();
-        if buffer_size == 0 {
+        if self.buffer_size == 0 {
             let len = f.metadata()?.len();
             if len > 0 {
                 let mmap = unsafe { memmap2::MmapOptions::new().map(&f)? };
                 hasher.update(&mmap[..]);
             }
         } else {
-            let mut buf = vec![0u8; buffer_size];
+            let mut buf = vec![0u8; self.buffer_size];
             loop {
                 let n = f.read(&mut buf)?;
                 if n == 0 {
