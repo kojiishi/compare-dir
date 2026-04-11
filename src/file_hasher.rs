@@ -257,7 +257,6 @@ impl FileHasher {
         let relative = path
             .strip_prefix(self.cache.base_dir())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-
         if let Some(hash) = self.cache.get(relative, modified) {
             self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
             return Ok(hash);
