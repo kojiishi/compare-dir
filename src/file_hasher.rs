@@ -297,26 +297,19 @@ impl FileHasher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-
-    fn create_file(path: &Path, content: &str) -> io::Result<()> {
-        let mut file = fs::File::create(path)?;
-        file.write_all(content.as_bytes())?;
-        Ok(())
-    }
 
     #[test]
     fn test_find_duplicates() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
 
         let file1_path = dir.path().join("same1.txt");
-        create_file(&file1_path, "same content")?;
+        fs::write(&file1_path, "same content")?;
 
         let file2_path = dir.path().join("same2.txt");
-        create_file(&file2_path, "same content")?;
+        fs::write(&file2_path, "same content")?;
 
         let diff_path = dir.path().join("diff.txt");
-        create_file(&diff_path, "different content")?;
+        fs::write(&diff_path, "different content")?;
 
         let mut hasher = FileHasher::new(dir.path().to_path_buf());
         hasher.buffer_size = 8192;
@@ -345,10 +338,10 @@ mod tests {
         fs::create_dir_all(&sub_dir)?;
 
         let file1_path = sub_dir.join("1");
-        create_file(&file1_path, "same content")?;
+        fs::write(&file1_path, "same content")?;
 
         let file2_path = sub_dir.join("2");
-        create_file(&file2_path, "same content")?;
+        fs::write(&file2_path, "same content")?;
 
         // Create empty cache file in a/a to force it to be the cache base
         let cache_aa_path = sub_dir.join(FileHashCache::FILE_NAME);
@@ -359,6 +352,8 @@ mod tests {
         let duplicates_aa = hasher_aa.find_duplicates()?;
         assert_eq!(duplicates_aa.len(), 1);
         assert!(cache_aa_path.exists());
+        assert_eq!(hasher_aa.num_hashed.load(Ordering::Relaxed), 2);
+        assert_eq!(hasher_aa.num_hash_looked_up.load(Ordering::Relaxed), 0);
 
         // Create empty cache file in a to force it to be the cache base
         let root_a = dir_path.join("a");
@@ -369,8 +364,10 @@ mod tests {
         let hasher_a = FileHasher::new(root_a.clone());
         let duplicates_a = hasher_a.find_duplicates()?;
         assert_eq!(duplicates_a.len(), 1);
+        assert_eq!(hasher_a.num_hashed.load(Ordering::Relaxed), 0);
+        assert_eq!(hasher_a.num_hash_looked_up.load(Ordering::Relaxed), 2);
 
-        // It should have merged and removed the child cache.
+        // The merged child cache should be removed.
         assert!(cache_a_path.exists());
         assert!(!cache_aa_path.exists());
 
