@@ -28,7 +28,7 @@ impl<'a> Iterator for FileIterator<'a> {
             match entry {
                 Ok(entry) => {
                     if entry.file_type().is_file() {
-                        let rel_path = entry.path().strip_prefix(&self.dir).unwrap();
+                        let rel_path = crate::strip_prefix(entry.path(), &self.dir).unwrap();
                         return Some((rel_path.to_path_buf(), entry.path().to_path_buf()));
                     } else if entry.file_type().is_dir()
                         && let Some(hasher) = self.hasher
