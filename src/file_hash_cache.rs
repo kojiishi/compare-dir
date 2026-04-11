@@ -27,7 +27,6 @@ impl CacheEntry {
                 .duration_since(modified)
                 .unwrap_or(Duration::ZERO)
         };
-        eprintln!("diff: {:?} - {:?} = {:?}", self.modified, modified, diff);
         diff < Duration::from_nanos(100)
     }
 }
