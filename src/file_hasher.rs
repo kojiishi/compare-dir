@@ -335,4 +335,45 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_find_duplicates_merge_cache() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let dir_path = dir.path();
+
+        let sub_dir = dir_path.join("a").join("a");
+        fs::create_dir_all(&sub_dir)?;
+
+        let file1_path = sub_dir.join("1");
+        create_file(&file1_path, "same content")?;
+
+        let file2_path = sub_dir.join("2");
+        create_file(&file2_path, "same content")?;
+
+        // Create empty cache file in a/a to force it to be the cache base
+        let cache_aa_path = sub_dir.join(FileHashCache::FILE_NAME);
+        fs::File::create(&cache_aa_path)?;
+
+        // Run find_duplicates on a/a
+        let hasher_aa = FileHasher::new(sub_dir.clone());
+        let duplicates_aa = hasher_aa.find_duplicates()?;
+        assert_eq!(duplicates_aa.len(), 1);
+        assert!(cache_aa_path.exists());
+
+        // Create empty cache file in a to force it to be the cache base
+        let root_a = dir_path.join("a");
+        let cache_a_path = root_a.join(FileHashCache::FILE_NAME);
+        fs::File::create(&cache_a_path)?;
+
+        // Run find_duplicates on a
+        let hasher_a = FileHasher::new(root_a.clone());
+        let duplicates_a = hasher_a.find_duplicates()?;
+        assert_eq!(duplicates_a.len(), 1);
+
+        // It should have merged and removed the child cache.
+        assert!(cache_a_path.exists());
+        assert!(!cache_aa_path.exists());
+
+        Ok(())
+    }
 }
