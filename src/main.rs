@@ -1,7 +1,10 @@
 use clap::{ArgAction, Parser};
 use compare_dir::{DirectoryComparer, FileComparer, FileComparisonMethod, FileHasher};
-use std::io;
-use std::path::PathBuf;
+use std::{
+    env,
+    io::{self, Write},
+    path::PathBuf,
+};
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
 enum CompareMethod {
@@ -74,16 +77,24 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn init_logger(verbose: u8) {
-    if verbose == 0 {
+    // If `RUST_LOG` is set, initialize the `env_logger` in its default config.
+    if verbose == 0 || env::var("RUST_LOG").is_ok() {
         env_logger::init();
         return;
     }
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(match verbose {
-        1 => "info",
-        2 => "debug",
-        _ => "trace",
-    }))
-    .init();
+
+    // Otherwise setup according to the `verbose` level, in a simpler format.
+    env_logger::Builder::from_env(env_logger::Env::default())
+        .filter_level(match verbose {
+            1 => log::LevelFilter::Info,
+            2 => log::LevelFilter::Debug,
+            _ => log::LevelFilter::Trace,
+        })
+        .format(|buf, record| {
+            let style = buf.default_level_style(record.level());
+            writeln!(buf, "{style}{}{style:#}: {}", record.level(), record.args())
+        })
+        .init();
 }
 
 fn ensure_absolute_path(path: &mut PathBuf) -> io::Result<()> {
