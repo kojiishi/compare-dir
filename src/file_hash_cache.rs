@@ -12,6 +12,24 @@ pub struct CacheEntry {
     pub modified: SystemTime,
 }
 
+impl CacheEntry {
+    /// Returns true if the modified time is within 100ns tolerance.
+    /// This tolerance is needed because Windows `FILETIME` has 100ns resolution,
+    /// while other platforms may have higher (e.g. 1ns) resolution.
+    pub fn matches(&self, modified: SystemTime) -> bool {
+        let diff = if modified > self.modified {
+            modified
+                .duration_since(self.modified)
+                .unwrap_or(Duration::ZERO)
+        } else {
+            self.modified
+                .duration_since(modified)
+                .unwrap_or(Duration::ZERO)
+        };
+        diff < Duration::from_nanos(100)
+    }
+}
+
 struct CacheState {
     entries: HashMap<PathBuf, CacheEntry>,
     is_dirty: bool,
@@ -124,7 +142,7 @@ impl FileHashCache {
         assert!(path.is_relative());
         let state = self.state.lock().unwrap();
         if let Some(entry) = state.entries.get(path)
-            && entry.modified == modified
+            && entry.matches(modified)
         {
             return Some(entry.hash);
         }
@@ -548,6 +566,39 @@ mod tests {
         parent_cache.save()?;
 
         assert!(!child_cache_path.exists());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_timestamp_tolerance() -> anyhow::Result<()> {
+        let dir = tempdir()?;
+        let cache = FileHashCache::new(dir.path());
+
+        let path = PathBuf::from("test.txt");
+        let hash =
+            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
+
+        let base_time = UNIX_EPOCH + Duration::new(12345, 67890);
+
+        cache.insert(&path, base_time, hash);
+
+        // Lookup with exact time should work
+        assert!(cache.get(&path, base_time).is_some());
+
+        // Lookup with time differing by less than 100ns should work
+        let close_time = UNIX_EPOCH + Duration::new(12345, 67900); // +10ns
+        assert!(cache.get(&path, close_time).is_some());
+
+        let another_close_time = UNIX_EPOCH + Duration::new(12345, 67800); // -90ns
+        assert!(cache.get(&path, another_close_time).is_some());
+
+        // Lookup with time differing by 100ns or more should fail
+        let far_time = UNIX_EPOCH + Duration::new(12345, 67990); // +100ns
+        assert!(cache.get(&path, far_time).is_none());
+
+        let another_far_time = UNIX_EPOCH + Duration::new(12345, 67790); // -100ns
+        assert!(cache.get(&path, another_far_time).is_none());
 
         Ok(())
     }
