@@ -581,19 +581,19 @@ mod tests {
         let path = PathBuf::from("test.txt");
         let hash =
             Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
-        let base_time = UNIX_EPOCH + Duration::new(12345, 67890);
-        cache.insert(&path, base_time, hash);
+        let time = UNIX_EPOCH + Duration::new(12345, 67890);
+        cache.insert(&path, time, hash);
 
         // Lookup with exact time should work
-        assert!(cache.get(&path, base_time).is_some());
+        assert!(cache.get(&path, time).is_some());
 
         // Lookup with time differing by less than 100ns should work
-        assert!(cache.get(&path, base_time.add(Duration::new(0, 10))).is_some());
-        assert!(cache.get(&path, base_time.sub(Duration::new(0, 90))).is_some());
+        assert!(cache.get(&path, time.add(Duration::new(0, 10))).is_some());
+        assert!(cache.get(&path, time.sub(Duration::new(0, 90))).is_some());
 
         // Lookup with time differing by 100ns or more should fail
-        assert!(cache.get(&path, base_time.add(Duration::new(0, 100))).is_none());
-        assert!(cache.get(&path, base_time.sub(Duration::new(0, 100))).is_none());
+        assert!(cache.get(&path, time.add(Duration::new(0, 100))).is_none());
+        assert!(cache.get(&path, time.sub(Duration::new(0, 100))).is_none());
 
         Ok(())
     }
