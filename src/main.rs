@@ -1,7 +1,7 @@
 use clap::{ArgAction, Parser};
 use compare_dir::{DirectoryComparer, FileComparer, FileComparisonMethod, FileHasher};
 use std::io;
-use std::path::{self, PathBuf};
+use std::path::PathBuf;
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
 enum CompareMethod {
@@ -87,8 +87,9 @@ fn init_logger(verbose: u8) {
 }
 
 fn ensure_absolute_path(path: &mut PathBuf) -> io::Result<()> {
-    if !path.is_absolute() {
-        *path = path::absolute(&path)?;
-    }
+    // `canonicalize` instead of `absolute` to ensure cache paths match on case
+    // insensitive file systems.
+    // Use `dunce` to minimize unnecessary UNC on Windows.
+    *path = dunce::canonicalize(&path)?;
     Ok(())
 }
