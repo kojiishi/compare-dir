@@ -209,36 +209,29 @@ impl FileComparisonResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
 
     fn check_compare(content1: &[u8], content2: &[u8], expected: bool) -> io::Result<()> {
-        let mut f1 = NamedTempFile::new()?;
-        let mut f2 = NamedTempFile::new()?;
-        f1.write_all(content1)?;
-        f2.write_all(content2)?;
-        f1.as_file().sync_all()?;
-        f2.as_file().sync_all()?;
+        let dir1 = tempfile::tempdir()?;
+        let dir2 = tempfile::tempdir()?;
+        let f1_path = dir1.path().join("file");
+        let f2_path = dir2.path().join("file");
+        fs::write(&f1_path, content1)?;
+        fs::write(&f2_path, content2)?;
 
         // Without hashers
-        let mut comparer = FileComparer::new(f1.path(), f2.path());
+        let mut comparer = FileComparer::new(&f1_path, &f2_path);
         comparer.buffer_size = 8192;
         assert_eq!(comparer.compare_contents()?, expected);
 
+        // Use mmap without hashers
         comparer.buffer_size = 0;
         assert_eq!(comparer.compare_contents()?, expected);
 
         // With hashers
-        let dir1 = f1.path().parent().unwrap();
-        let dir2 = f2.path().parent().unwrap();
-
-        let hasher1 = FileHasher::new(dir1.to_path_buf());
-        let hasher2 = FileHasher::new(dir2.to_path_buf());
-
-        let mut comparer_hash = FileComparer::new(f1.path(), f2.path());
-        comparer_hash.hashers = Some((&hasher1, &hasher2));
-
-        assert_eq!(comparer_hash.compare_contents()?, expected);
+        let hasher1 = FileHasher::new(dir1.path().to_path_buf());
+        let hasher2 = FileHasher::new(dir2.path().to_path_buf());
+        comparer.hashers = Some((&hasher1, &hasher2));
+        assert_eq!(comparer.compare_contents()?, expected);
 
         Ok(())
     }
