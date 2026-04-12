@@ -108,10 +108,8 @@ impl FileHashCache {
     /// If both maps have an entry for a path, `self` wins.
     pub fn merge(&self, other: &Self) {
         assert!(!std::ptr::eq(self, other), "Cannot merge cache with itself");
-        let rel_prefix = other
-            .base_dir
-            .strip_prefix(&self.base_dir)
-            .unwrap_or_else(|_| {
+        let rel_prefix =
+            crate::strip_prefix(&other.base_dir, &self.base_dir).unwrap_or_else(|_| {
                 panic!(
                     "Cannot merge cache from {:?} into {:?}",
                     other.base_dir, self.base_dir

@@ -49,7 +49,7 @@ impl FileHasher {
 
     /// Remove a cache entry if it exists.
     pub fn remove_cache_entry(&self, path: &Path) -> anyhow::Result<()> {
-        let relative = path.strip_prefix(self.cache.base_dir())?;
+        let relative = crate::strip_prefix(path, self.cache.base_dir())?;
         self.cache.remove(relative);
         Ok(())
     }
@@ -72,7 +72,7 @@ impl FileHasher {
 
     /// Clears the loaded hashes in the cache.
     pub fn clear_cache(&self) -> anyhow::Result<()> {
-        let relative = self.dir.strip_prefix(self.cache.base_dir())?;
+        let relative = crate::strip_prefix(&self.dir, self.cache.base_dir())?;
         self.cache.clear(relative);
         Ok(())
     }
@@ -226,8 +226,7 @@ impl FileHasher {
         modified: std::time::SystemTime,
         tx: &mpsc::Sender<HashProgress>,
     ) {
-        let relative = path
-            .strip_prefix(self.cache.base_dir())
+        let relative = crate::strip_prefix(path, self.cache.base_dir())
             .expect("path should be in cache base_dir");
         if let Some(hash) = self.cache.get(relative, modified) {
             self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
@@ -254,8 +253,7 @@ impl FileHasher {
     pub fn get_hash(&self, path: &Path) -> io::Result<blake3::Hash> {
         let meta = fs::metadata(path)?;
         let modified = meta.modified()?;
-        let relative = path
-            .strip_prefix(self.cache.base_dir())
+        let relative = crate::strip_prefix(path, self.cache.base_dir())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
         if let Some(hash) = self.cache.get(relative, modified) {
             self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
