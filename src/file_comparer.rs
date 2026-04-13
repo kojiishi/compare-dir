@@ -51,6 +51,7 @@ impl<'a> FileComparer<'a> {
             return Ok(hash1? == hash2?);
         }
 
+        let start_time = std::time::Instant::now();
         let mut f1 = fs::File::open(self.path1)?;
         let mut f2 = fs::File::open(self.path2)?;
         if self.buffer_size == 0 {
@@ -64,7 +65,9 @@ impl<'a> FileComparer<'a> {
             }
             let mmap1 = unsafe { memmap2::MmapOptions::new().map(&f1)? };
             let mmap2 = unsafe { memmap2::MmapOptions::new().map(&f2)? };
-            return Ok(mmap1[..] == mmap2[..]);
+            let result = mmap1[..] == mmap2[..];
+            log::trace!("Compared in {:?}: {:?}", start_time.elapsed(), self.path1);
+            return Ok(result);
         }
 
         let mut buf1 = vec![0u8; self.buffer_size];
@@ -77,9 +80,11 @@ impl<'a> FileComparer<'a> {
             let n1 = n1?;
             let n2 = n2?;
             if n1 != n2 || buf1[..n1] != buf2[..n2] {
+                log::trace!("Compared in {:?}: {:?}", start_time.elapsed(), self.path1);
                 return Ok(false);
             }
             if n1 == 0 {
+                log::trace!("Compared in {:?}: {:?}", start_time.elapsed(), self.path1);
                 return Ok(true);
             }
         }
@@ -127,7 +132,6 @@ impl FileComparisonResult {
         self.size_comparison = Some(s1.cmp(&s2));
 
         if should_compare_content && s1 == s2 {
-            log::trace!("Comparing content: {:?}", self.relative_path);
             self.is_content_same = Some(comparer.compare_contents()?);
         }
         Ok(())

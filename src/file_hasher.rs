@@ -286,7 +286,7 @@ impl FileHasher {
                 hasher.update(&buf[..n]);
             }
         }
-        log::trace!("Hashed in {:?}: {:?}", start_time.elapsed(), path);
+        log::trace!("Computed hash in {:?}: {:?}", start_time.elapsed(), path);
         Ok(hasher.finalize())
     }
 }
