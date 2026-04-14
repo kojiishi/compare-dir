@@ -9,9 +9,11 @@ tasks:
     - task: test
     - task: lint
     - task: fmt
-  test: cargo test
-  lint: cargo clippy -- -D warnings
-  fmt: cargo fmt
   fix:
     - cargo clippy --fix -- -D warnings
     - task: fmt
+  fmt:
+    - cargo fmt
+    - git diff
+  lint: cargo clippy -- -D warnings
+  test: cargo test
