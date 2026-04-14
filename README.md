@@ -163,9 +163,9 @@ dir1/dir2/file: Contents differ
 ### Hash Cache Directory
 [Hash Cache Directory]: #hash-cache-directory
 
-`compare-dir` searches the `.hash_cache`
-in the specified directory and its ancestor directories.
-If not found, it creates it in the specified directory.
+If a `.hash_cache` cannot be found in the specified directory,
+`compare-dir` will walk up the file tree until it finds one.
+If none is found, a new `.hash_cache` is created in the specified directory.
 
 For example:
 ```bash
