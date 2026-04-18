@@ -10,10 +10,14 @@ tasks:
     - task: lint
     - task: fmt
   fix:
-    - cargo clippy --fix -- -D warnings
+    - cargo clippy --fix --all-targets --all-features -- -D warnings
     - task: fmt
   fmt:
-    - cargo fmt
+    - cargo fmt --all
     - git diff
-  lint: cargo clippy -- -D warnings
-  test: cargo test
+  lint: cargo clippy --all-targets --all-features -- -D warnings
+  test:
+    cmds:
+      - cargo test
+    env:
+      RUST_BACKTRACE: 1
