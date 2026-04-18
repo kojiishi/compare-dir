@@ -16,72 +16,6 @@ enum CompareProgress {
     Result(usize, FileComparisonResult),
 }
 
-#[derive(Default)]
-struct ComparisonSummary {
-    pub in_both: usize,
-    pub only_in_dir1: usize,
-    pub only_in_dir2: usize,
-    pub dir1_newer: usize,
-    pub dir2_newer: usize,
-    pub same_time_diff_size: usize,
-    pub same_time_size_diff_content: usize,
-}
-
-impl ComparisonSummary {
-    pub fn update(&mut self, result: &FileComparisonResult) {
-        match result.classification {
-            Classification::OnlyInDir1 => self.only_in_dir1 += 1,
-            Classification::OnlyInDir2 => self.only_in_dir2 += 1,
-            Classification::InBoth => {
-                self.in_both += 1;
-                match result.modified_time_comparison {
-                    Some(Ordering::Greater) => self.dir1_newer += 1,
-                    Some(Ordering::Less) => self.dir2_newer += 1,
-                    _ => {
-                        if result.size_comparison != Some(Ordering::Equal) {
-                            self.same_time_diff_size += 1;
-                        } else if result.is_content_same == Some(false) {
-                            self.same_time_size_diff_content += 1;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn print(
-        &self,
-        mut writer: impl std::io::Write,
-        dir1_name: &str,
-        dir2_name: &str,
-    ) -> std::io::Result<()> {
-        writeln!(writer, "Files in both: {}", self.in_both)?;
-        writeln!(writer, "Files only in {}: {}", dir1_name, self.only_in_dir1)?;
-        writeln!(writer, "Files only in {}: {}", dir2_name, self.only_in_dir2)?;
-        writeln!(
-            writer,
-            "Files in both ({} is newer): {}",
-            dir1_name, self.dir1_newer
-        )?;
-        writeln!(
-            writer,
-            "Files in both ({} is newer): {}",
-            dir2_name, self.dir2_newer
-        )?;
-        writeln!(
-            writer,
-            "Files in both (same time, different size): {}",
-            self.same_time_diff_size
-        )?;
-        writeln!(
-            writer,
-            "Files in both (same time and size, different content): {}",
-            self.same_time_size_diff_content
-        )?;
-        Ok(())
-    }
-}
-
 /// Methods for comparing files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileComparisonMethod {
@@ -368,6 +302,72 @@ impl DirectoryComparer {
             println!("{}: {}", file1_str, result.to_string(file1_str, file2_str));
         }
         Self::save_hashers(hashers)?;
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct ComparisonSummary {
+    pub in_both: usize,
+    pub only_in_dir1: usize,
+    pub only_in_dir2: usize,
+    pub dir1_newer: usize,
+    pub dir2_newer: usize,
+    pub same_time_diff_size: usize,
+    pub same_time_size_diff_content: usize,
+}
+
+impl ComparisonSummary {
+    pub fn update(&mut self, result: &FileComparisonResult) {
+        match result.classification {
+            Classification::OnlyInDir1 => self.only_in_dir1 += 1,
+            Classification::OnlyInDir2 => self.only_in_dir2 += 1,
+            Classification::InBoth => {
+                self.in_both += 1;
+                match result.modified_time_comparison {
+                    Some(Ordering::Greater) => self.dir1_newer += 1,
+                    Some(Ordering::Less) => self.dir2_newer += 1,
+                    _ => {
+                        if result.size_comparison != Some(Ordering::Equal) {
+                            self.same_time_diff_size += 1;
+                        } else if result.is_content_same == Some(false) {
+                            self.same_time_size_diff_content += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn print(
+        &self,
+        mut writer: impl std::io::Write,
+        dir1_name: &str,
+        dir2_name: &str,
+    ) -> std::io::Result<()> {
+        writeln!(writer, "Files in both: {}", self.in_both)?;
+        writeln!(writer, "Files only in {}: {}", dir1_name, self.only_in_dir1)?;
+        writeln!(writer, "Files only in {}: {}", dir2_name, self.only_in_dir2)?;
+        writeln!(
+            writer,
+            "Files in both ({} is newer): {}",
+            dir1_name, self.dir1_newer
+        )?;
+        writeln!(
+            writer,
+            "Files in both ({} is newer): {}",
+            dir2_name, self.dir2_newer
+        )?;
+        writeln!(
+            writer,
+            "Files in both (same time, different size): {}",
+            self.same_time_diff_size
+        )?;
+        writeln!(
+            writer,
+            "Files in both (same time and size, different content): {}",
+            self.same_time_size_diff_content
+        )?;
         Ok(())
     }
 }
