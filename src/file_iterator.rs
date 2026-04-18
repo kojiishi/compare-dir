@@ -7,7 +7,7 @@ pub(crate) struct FileIterator<'a> {
     iter: walkdir::IntoIter,
     dir: PathBuf,
     pub(crate) hasher: Option<&'a FileHasher>,
-    pub(crate) filter: Option<&'a GlobSet>,
+    pub(crate) exclude: Option<&'a GlobSet>,
 }
 
 impl<'a> FileIterator<'a> {
@@ -18,7 +18,7 @@ impl<'a> FileIterator<'a> {
             iter,
             dir,
             hasher: None,
-            filter: None,
+            exclude: None,
         }
     }
 }
@@ -30,7 +30,7 @@ impl<'a> Iterator for FileIterator<'a> {
         while let Some(entry) = self.iter.next() {
             match entry {
                 Ok(entry) => {
-                    if self.filter.is_some_and(|f| f.is_match(entry.file_name())) {
+                    if self.exclude.is_some_and(|f| f.is_match(entry.file_name())) {
                         if entry.file_type().is_dir() {
                             self.iter.skip_current_dir();
                         }

@@ -56,17 +56,12 @@ fn main() -> anyhow::Result<()> {
         DirectoryComparer::set_max_threads(args.parallel)?;
     }
 
+    // Build the exclude filter.
+    let default_excludes = [".hash_cache", "Thumbs.db"];
     let mut builder = GlobSetBuilder::new();
-    builder.add(
-        GlobBuilder::new(".hash_cache")
-            .case_insensitive(true)
-            .build()?,
-    );
-    builder.add(
-        GlobBuilder::new("Thumbs.db")
-            .case_insensitive(true)
-            .build()?,
-    );
+    for pattern in &default_excludes {
+        builder.add(GlobBuilder::new(pattern).case_insensitive(true).build()?);
+    }
     for pattern in &args.exclude {
         if pattern.is_empty() {
             builder = GlobSetBuilder::new();
@@ -74,7 +69,7 @@ fn main() -> anyhow::Result<()> {
             builder.add(GlobBuilder::new(pattern).case_insensitive(true).build()?);
         }
     }
-    let filter = builder.build()?;
+    let exclude = builder.build()?;
 
     // Ensure paths are absolute. It helps when computing relative paths and
     // walking ancestors.
@@ -90,7 +85,7 @@ fn main() -> anyhow::Result<()> {
             CompareMethod::Rehash => FileComparisonMethod::Rehash,
             CompareMethod::Full => FileComparisonMethod::Full,
         };
-        comparer.filter = Some(filter);
+        comparer.exclude = Some(exclude);
         comparer.run()
     } else {
         let mut hasher = FileHasher::new(args.dir1);
@@ -98,7 +93,7 @@ fn main() -> anyhow::Result<()> {
         if args.compare == CompareMethod::Rehash {
             hasher.clear_cache()?;
         }
-        hasher.filter = Some(filter);
+        hasher.exclude = Some(exclude);
         hasher.run()
     }
 }

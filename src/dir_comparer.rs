@@ -102,7 +102,7 @@ pub struct DirectoryComparer {
     pub is_symbols_format: bool,
     pub buffer_size: usize,
     pub comparison_method: FileComparisonMethod,
-    pub filter: Option<GlobSet>,
+    pub exclude: Option<GlobSet>,
 }
 
 impl DirectoryComparer {
@@ -114,7 +114,7 @@ impl DirectoryComparer {
             is_symbols_format: false,
             buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
             comparison_method: FileComparisonMethod::Hash,
-            filter: None,
+            exclude: None,
         }
     }
 
@@ -230,8 +230,8 @@ impl DirectoryComparer {
     fn compare_streaming_unordered(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
         let mut it1 = FileIterator::new(self.dir1.clone());
         let mut it2 = FileIterator::new(self.dir2.clone());
-        it1.filter = self.filter.as_ref();
-        it2.filter = self.filter.as_ref();
+        it1.exclude = self.exclude.as_ref();
+        it2.exclude = self.exclude.as_ref();
         let hashers = self.get_hashers(&self.dir1, &self.dir2)?;
         if let Some((h1, h2)) = &hashers {
             it1.hasher = Some(h1);

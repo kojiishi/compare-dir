@@ -33,7 +33,7 @@ pub struct FileHasher {
     cache: Arc<FileHashCache>,
     pub(crate) num_hashed: AtomicUsize,
     pub(crate) num_hash_looked_up: AtomicUsize,
-    pub filter: Option<GlobSet>,
+    pub exclude: Option<GlobSet>,
 }
 
 impl FileHasher {
@@ -46,7 +46,7 @@ impl FileHasher {
             cache,
             num_hashed: AtomicUsize::new(0),
             num_hash_looked_up: AtomicUsize::new(0),
-            filter: None,
+            exclude: None,
         }
     }
 
@@ -182,7 +182,7 @@ impl FileHasher {
         rayon::scope(|scope| -> anyhow::Result<()> {
             let mut it = FileIterator::new(self.dir.clone());
             it.hasher = Some(self);
-            it.filter = self.filter.as_ref();
+            it.exclude = self.exclude.as_ref();
             for (_, current_path) in it {
                 let meta = fs::metadata(&current_path)?;
                 let size = meta.len();
@@ -397,7 +397,7 @@ mod tests {
                 .build()?,
         );
         let filter = builder.build()?;
-        hasher.filter = Some(filter);
+        hasher.exclude = Some(filter);
 
         let duplicates = hasher.find_duplicates()?;
         assert_eq!(duplicates.len(), 1);
