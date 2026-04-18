@@ -1,4 +1,5 @@
-use crate::{FileFilter, FileHashCache, FileHasher};
+use crate::{FileHashCache, FileHasher};
+use globset::GlobSet;
 use std::path::PathBuf;
 use walkdir::WalkDir;
 
@@ -6,7 +7,7 @@ pub(crate) struct FileIterator<'a> {
     iter: walkdir::IntoIter,
     dir: PathBuf,
     pub(crate) hasher: Option<&'a FileHasher>,
-    pub(crate) filter: Option<&'a FileFilter>,
+    pub(crate) filter: Option<&'a GlobSet>,
 }
 
 impl<'a> FileIterator<'a> {

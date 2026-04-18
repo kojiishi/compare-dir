@@ -1,7 +1,6 @@
 use clap::{ArgAction, Parser};
-use compare_dir::{
-    DirectoryComparer, FileComparer, FileComparisonMethod, FileFilterBuilder, FileHasher,
-};
+use compare_dir::{DirectoryComparer, FileComparer, FileComparisonMethod, FileHasher};
+use globset::{GlobBuilder, GlobSetBuilder};
 use std::{
     env,
     io::{self, Write},
@@ -57,14 +56,22 @@ fn main() -> anyhow::Result<()> {
         DirectoryComparer::set_max_threads(args.parallel)?;
     }
 
-    let mut builder = FileFilterBuilder::new();
-    builder.add_pattern(".hash_cache")?;
-    builder.add_pattern("Thumbs.db")?;
+    let mut builder = GlobSetBuilder::new();
+    builder.add(
+        GlobBuilder::new(".hash_cache")
+            .case_insensitive(true)
+            .build()?,
+    );
+    builder.add(
+        GlobBuilder::new("Thumbs.db")
+            .case_insensitive(true)
+            .build()?,
+    );
     for pattern in &args.exclude {
         if pattern.is_empty() {
-            builder = FileFilterBuilder::new();
+            builder = GlobSetBuilder::new();
         } else {
-            builder.add_pattern(pattern)?;
+            builder.add(GlobBuilder::new(pattern).case_insensitive(true).build()?);
         }
     }
     let filter = builder.build()?;

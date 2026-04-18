@@ -1,7 +1,7 @@
 use crate::{
-    Classification, FileComparer, FileComparisonResult, FileFilter, FileHasher, FileIterator,
-    ProgressReporter,
+    Classification, FileComparer, FileComparisonResult, FileHasher, FileIterator, ProgressReporter,
 };
+use globset::GlobSet;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -102,7 +102,7 @@ pub struct DirectoryComparer {
     pub is_symbols_format: bool,
     pub buffer_size: usize,
     pub comparison_method: FileComparisonMethod,
-    pub filter: Option<FileFilter>,
+    pub filter: Option<GlobSet>,
 }
 
 impl DirectoryComparer {

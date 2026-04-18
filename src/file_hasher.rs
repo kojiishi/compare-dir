@@ -1,4 +1,5 @@
-use crate::{FileFilter, FileHashCache, FileIterator, ProgressReporter};
+use crate::{FileHashCache, FileIterator, ProgressReporter};
+use globset::GlobSet;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
@@ -32,7 +33,7 @@ pub struct FileHasher {
     cache: Arc<FileHashCache>,
     pub(crate) num_hashed: AtomicUsize,
     pub(crate) num_hash_looked_up: AtomicUsize,
-    pub filter: Option<FileFilter>,
+    pub filter: Option<GlobSet>,
 }
 
 impl FileHasher {
@@ -389,8 +390,12 @@ mod tests {
 
         let mut hasher = FileHasher::new(dir.path().to_path_buf());
         hasher.buffer_size = 8192;
-        let mut builder = crate::FileFilterBuilder::new();
-        builder.add_pattern("exclude.txt")?;
+        let mut builder = globset::GlobSetBuilder::new();
+        builder.add(
+            globset::GlobBuilder::new("exclude.txt")
+                .case_insensitive(true)
+                .build()?,
+        );
         let filter = builder.build()?;
         hasher.filter = Some(filter);
 
