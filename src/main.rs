@@ -57,17 +57,18 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Build the exclude filter.
-    let default_excludes = [".hash_cache", "Thumbs.db"];
-    let mut builder = GlobSetBuilder::new();
-    for pattern in &default_excludes {
-        builder.add(GlobBuilder::new(pattern).case_insensitive(true).build()?);
-    }
+    let mut patterns = vec![".hash_cache", "Thumbs.db", ".DS_Store", ".apdisk"];
     for pattern in &args.exclude {
         if pattern.is_empty() {
-            builder = GlobSetBuilder::new();
+            patterns.clear();
         } else {
-            builder.add(GlobBuilder::new(pattern).case_insensitive(true).build()?);
+            patterns.push(pattern);
         }
+    }
+    log::info!("Exclude: {:?}", patterns);
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        builder.add(GlobBuilder::new(pattern).case_insensitive(true).build()?);
     }
     let exclude = builder.build()?;
 
