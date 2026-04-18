@@ -1,6 +1,6 @@
 [package]
 name = "compare-dir"
-version = "0.6.5"
+version = "0.6.6"
 edition = "2024"
 rust-version = "1.88"
 description = "A high-performance directory comparison tool and library"

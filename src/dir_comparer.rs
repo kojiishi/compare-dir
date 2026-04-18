@@ -313,8 +313,9 @@ struct ComparisonSummary {
     pub only_in_dir2: usize,
     pub dir1_newer: usize,
     pub dir2_newer: usize,
-    pub same_time_diff_size: usize,
-    pub same_time_size_diff_content: usize,
+    pub diff_size: usize,
+    pub diff_content: usize,
+    pub not_comparable: usize,
 }
 
 impl ComparisonSummary {
@@ -324,16 +325,24 @@ impl ComparisonSummary {
             Classification::OnlyInDir2 => self.only_in_dir2 += 1,
             Classification::InBoth => {
                 self.in_both += 1;
+                let mut is_not_comparable = false;
                 match result.modified_time_comparison {
                     Some(Ordering::Greater) => self.dir1_newer += 1,
                     Some(Ordering::Less) => self.dir2_newer += 1,
-                    _ => {
-                        if result.size_comparison != Some(Ordering::Equal) {
-                            self.same_time_diff_size += 1;
-                        } else if result.is_content_same == Some(false) {
-                            self.same_time_size_diff_content += 1;
-                        }
-                    }
+                    Some(Ordering::Equal) => {}
+                    None => is_not_comparable = true,
+                }
+                match result.size_comparison {
+                    Some(Ordering::Greater) | Some(Ordering::Less) => self.diff_size += 1,
+                    Some(Ordering::Equal) => match result.is_content_same {
+                        Some(false) => self.diff_content += 1,
+                        Some(true) => {}
+                        None => is_not_comparable = true,
+                    },
+                    None => is_not_comparable = true,
+                }
+                if is_not_comparable {
+                    self.not_comparable += 1;
                 }
             }
         }
@@ -345,29 +354,22 @@ impl ComparisonSummary {
         dir1_name: &str,
         dir2_name: &str,
     ) -> std::io::Result<()> {
-        writeln!(writer, "Files in both: {}", self.in_both)?;
-        writeln!(writer, "Files only in {}: {}", dir1_name, self.only_in_dir1)?;
-        writeln!(writer, "Files only in {}: {}", dir2_name, self.only_in_dir2)?;
-        writeln!(
-            writer,
-            "Files in both ({} is newer): {}",
-            dir1_name, self.dir1_newer
-        )?;
-        writeln!(
-            writer,
-            "Files in both ({} is newer): {}",
-            dir2_name, self.dir2_newer
-        )?;
-        writeln!(
-            writer,
-            "Files in both (same time, different size): {}",
-            self.same_time_diff_size
-        )?;
-        writeln!(
-            writer,
-            "Files in both (same time and size, different content): {}",
-            self.same_time_size_diff_content
-        )?;
+        let values = [
+            ("Files in both:", self.in_both),
+            ("Files only in left:", self.only_in_dir1),
+            ("Files only in right:", self.only_in_dir2),
+            ("Left is newer:", self.dir1_newer),
+            ("Right is newer:", self.dir2_newer),
+            ("Different size:", self.diff_size),
+            ("Different content:", self.diff_content),
+            ("Not comparable:", self.not_comparable),
+        ];
+        let max_len = values.iter().map(|(s, _)| s.len()).max().unwrap();
+        writeln!(writer, "{:width$} {}", "Left:", dir1_name, width = max_len)?;
+        writeln!(writer, "{:width$} {}", "Right:", dir2_name, width = max_len)?;
+        for (label, value) in values {
+            writeln!(writer, "{:width$} {}", label, value, width = max_len)?;
+        }
         Ok(())
     }
 }
