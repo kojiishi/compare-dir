@@ -1,6 +1,6 @@
 [package]
 name = "compare-dir"
-version = "0.6.4"
+version = "0.6.5"
 edition = "2024"
 rust-version = "1.88"
 description = "A high-performance directory comparison tool and library"
@@ -19,6 +19,7 @@ blake3 = "1.8.4"
 clap = { version = "4.6", features = ["derive"] }
 dunce = "1.0.5"
 env_logger = "0.11"
+globset = "0.4"
 indicatif = "0.18"
 log = "0.4"
 memmap2 = "0.9.10"

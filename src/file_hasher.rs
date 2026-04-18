@@ -1,4 +1,4 @@
-use crate::{FileHashCache, FileIterator, ProgressReporter};
+use crate::{FileFilter, FileHashCache, FileIterator, ProgressReporter};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
@@ -32,6 +32,7 @@ pub struct FileHasher {
     cache: Arc<FileHashCache>,
     pub(crate) num_hashed: AtomicUsize,
     pub(crate) num_hash_looked_up: AtomicUsize,
+    pub filter: Option<FileFilter>,
 }
 
 impl FileHasher {
@@ -44,6 +45,7 @@ impl FileHasher {
             cache,
             num_hashed: AtomicUsize::new(0),
             num_hash_looked_up: AtomicUsize::new(0),
+            filter: None,
         }
     }
 
@@ -179,6 +181,7 @@ impl FileHasher {
         rayon::scope(|scope| -> anyhow::Result<()> {
             let mut it = FileIterator::new(self.dir.clone());
             it.hasher = Some(self);
+            it.filter = self.filter.as_ref();
             for (_, current_path) in it {
                 let meta = fs::metadata(&current_path)?;
                 let size = meta.len();
@@ -368,6 +371,36 @@ mod tests {
         assert!(cache_a_path.exists());
         assert!(!cache_aa_path.exists());
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_find_duplicates_with_exclude() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+
+        let file1_path = dir.path().join("same1.txt");
+        fs::write(&file1_path, "same content")?;
+
+        let file2_path = dir.path().join("same2.txt");
+        fs::write(&file2_path, "same content")?;
+
+        let exclude_path = dir.path().join("exclude.txt");
+        fs::write(&exclude_path, "same content")?;
+
+        let mut hasher = FileHasher::new(dir.path().to_path_buf());
+        hasher.buffer_size = 8192;
+        let mut builder = crate::FileFilterBuilder::new();
+        builder.add_pattern("exclude.txt")?;
+        let filter = builder.build()?;
+        hasher.filter = Some(filter);
+
+        let duplicates = hasher.find_duplicates()?;
+        assert_eq!(duplicates.len(), 1);
+        let group = &duplicates[0];
+        assert_eq!(group.paths.len(), 2);
+        assert!(group.paths.contains(&file1_path));
+        assert!(group.paths.contains(&file2_path));
+        assert!(!group.paths.contains(&exclude_path));
         Ok(())
     }
 }

@@ -1,5 +1,7 @@
 use clap::{ArgAction, Parser};
-use compare_dir::{DirectoryComparer, FileComparer, FileComparisonMethod, FileHasher};
+use compare_dir::{
+    DirectoryComparer, FileComparer, FileComparisonMethod, FileFilterBuilder, FileHasher,
+};
 use std::{
     env,
     io::{self, Write},
@@ -27,6 +29,10 @@ struct Args {
     #[arg(short, long, default_value = "hash")]
     compare: CompareMethod,
 
+    /// Patterns to exclude.
+    #[arg(short = 'x', long)]
+    exclude: Vec<String>,
+
     /// Symbolize output for programs to read.
     #[arg(short, long)]
     symbol: bool,
@@ -51,6 +57,18 @@ fn main() -> anyhow::Result<()> {
         DirectoryComparer::set_max_threads(args.parallel)?;
     }
 
+    let mut builder = FileFilterBuilder::new();
+    builder.add_pattern(".hash_cache")?;
+    builder.add_pattern("Thumbs.db")?;
+    for pattern in &args.exclude {
+        if pattern.is_empty() {
+            builder = FileFilterBuilder::new();
+        } else {
+            builder.add_pattern(pattern)?;
+        }
+    }
+    let filter = builder.build()?;
+
     // Ensure paths are absolute. It helps when computing relative paths and
     // walking ancestors.
     ensure_absolute_path(&mut args.dir1)?;
@@ -65,6 +83,7 @@ fn main() -> anyhow::Result<()> {
             CompareMethod::Rehash => FileComparisonMethod::Rehash,
             CompareMethod::Full => FileComparisonMethod::Full,
         };
+        comparer.filter = Some(filter);
         comparer.run()
     } else {
         let mut hasher = FileHasher::new(args.dir1);
@@ -72,6 +91,7 @@ fn main() -> anyhow::Result<()> {
         if args.compare == CompareMethod::Rehash {
             hasher.clear_cache()?;
         }
+        hasher.filter = Some(filter);
         hasher.run()
     }
 }

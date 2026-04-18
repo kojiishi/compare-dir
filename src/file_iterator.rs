@@ -1,4 +1,4 @@
-use crate::{FileHashCache, FileHasher};
+use crate::{FileFilter, FileHashCache, FileHasher};
 use std::path::PathBuf;
 use walkdir::WalkDir;
 
@@ -6,6 +6,7 @@ pub(crate) struct FileIterator<'a> {
     iter: walkdir::IntoIter,
     dir: PathBuf,
     pub(crate) hasher: Option<&'a FileHasher>,
+    pub(crate) filter: Option<&'a FileFilter>,
 }
 
 impl<'a> FileIterator<'a> {
@@ -16,6 +17,7 @@ impl<'a> FileIterator<'a> {
             iter,
             dir,
             hasher: None,
+            filter: None,
         }
     }
 }
@@ -24,9 +26,16 @@ impl<'a> Iterator for FileIterator<'a> {
     type Item = (PathBuf, PathBuf);
 
     fn next(&mut self) -> Option<Self::Item> {
-        for entry in &mut self.iter {
+        while let Some(entry) = self.iter.next() {
             match entry {
                 Ok(entry) => {
+                    if self.filter.is_some_and(|f| f.is_match(entry.file_name())) {
+                        if entry.file_type().is_dir() {
+                            self.iter.skip_current_dir();
+                        }
+                        continue;
+                    }
+
                     if entry.file_type().is_file() {
                         let rel_path = crate::strip_prefix(entry.path(), &self.dir).unwrap();
                         return Some((rel_path.to_path_buf(), entry.path().to_path_buf()));
