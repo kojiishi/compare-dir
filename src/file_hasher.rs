@@ -1,4 +1,4 @@
-use crate::{FileHashCache, FileIterator, ProgressReporter};
+use crate::{FileComparer, FileHashCache, FileIterator, ProgressReporter};
 use globset::GlobSet;
 use std::collections::HashMap;
 use std::fs;
@@ -42,7 +42,7 @@ impl FileHasher {
         let cache = FileHashCache::find_or_new(&dir);
         Self {
             dir,
-            buffer_size: crate::FileComparer::DEFAULT_BUFFER_SIZE,
+            buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
             cache,
             num_hashed: AtomicUsize::new(0),
             num_hash_looked_up: AtomicUsize::new(0),

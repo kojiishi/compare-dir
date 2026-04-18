@@ -316,10 +316,12 @@ impl DirectoryComparer {
         if self.comparison_method == FileComparisonMethod::Hash
             || self.comparison_method == FileComparisonMethod::Rehash
         {
-            let (h1, h2) = rayon::join(
+            let (mut h1, mut h2) = rayon::join(
                 || FileHasher::new(dir1.to_path_buf()),
                 || FileHasher::new(dir2.to_path_buf()),
             );
+            h1.buffer_size = self.buffer_size;
+            h2.buffer_size = self.buffer_size;
             return Ok(Some((h1, h2)));
         }
         Ok(None)
