@@ -87,7 +87,7 @@ impl FileHasher {
         if duplicates.is_empty() {
             println!("No duplicates found.");
         } else {
-            duplicates.sort_by(|a, b| a.size.cmp(&b.size));
+            duplicates.sort_by_key(|a| a.size);
             let mut total_wasted_space = 0;
             for dupes in &duplicates {
                 let paths = &dupes.paths;
