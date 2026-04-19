@@ -313,7 +313,8 @@ struct ComparisonSummary {
     pub only_in_dir2: usize,
     pub dir1_newer: usize,
     pub dir2_newer: usize,
-    pub diff_size: usize,
+    pub dir1_larger: usize,
+    pub dir2_larger: usize,
     pub diff_content: usize,
     pub not_comparable: usize,
 }
@@ -333,7 +334,8 @@ impl ComparisonSummary {
                     None => is_not_comparable = true,
                 }
                 match result.size_comparison {
-                    Some(Ordering::Greater) | Some(Ordering::Less) => self.diff_size += 1,
+                    Some(Ordering::Greater) => self.dir1_larger += 1,
+                    Some(Ordering::Less) => self.dir2_larger += 1,
                     Some(Ordering::Equal) => match result.is_content_same {
                         Some(false) => self.diff_content += 1,
                         Some(true) => {}
@@ -356,11 +358,12 @@ impl ComparisonSummary {
     ) -> std::io::Result<()> {
         let values = [
             ("Files in both:", self.in_both),
-            ("Files only in left:", self.only_in_dir1),
-            ("Files only in right:", self.only_in_dir2),
+            ("Only in left:", self.only_in_dir1),
+            ("Only in right:", self.only_in_dir2),
             ("Left is newer:", self.dir1_newer),
             ("Right is newer:", self.dir2_newer),
-            ("Different size:", self.diff_size),
+            ("Left is larger:", self.dir1_larger),
+            ("Right is larger:", self.dir2_larger),
             ("Different content:", self.diff_content),
             ("Not comparable:", self.not_comparable),
         ];
