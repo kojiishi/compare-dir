@@ -118,7 +118,13 @@ fn ensure_absolute_path(path: &mut PathBuf) -> io::Result<()> {
 /// empty pattern clears all defaults), this function returns `Ok(None)`. Otherwise, it
 /// returns `Ok(Some(GlobSet))` containing the compiled glob patterns.
 fn build_exclude(excludes: &[String]) -> anyhow::Result<Option<GlobSet>> {
-    let mut patterns = vec![".hash_cache", "Thumbs.db", ".DS_Store", ".apdisk"];
+    let mut patterns = vec![
+        ".hash_cache",
+        "Thumbs.db",
+        "System Volume Information",
+        ".DS_Store",
+        ".apdisk",
+    ];
     for pattern in excludes {
         if pattern.is_empty() {
             // If an empty pattern is given, clear all default excludes
