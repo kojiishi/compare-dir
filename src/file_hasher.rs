@@ -290,7 +290,7 @@ impl FileHasher {
                 hasher.update(&buf[..n]);
             }
         }
-        log::trace!("Computed hash in {:?}: {:?}", start_time.elapsed(), path);
+        log::debug!("Computed hash in {:?}: {:?}", start_time.elapsed(), path);
         Ok(hasher.finalize())
     }
 }

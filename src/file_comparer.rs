@@ -66,7 +66,7 @@ impl<'a> FileComparer<'a> {
             let mmap1 = unsafe { memmap2::MmapOptions::new().map(&f1)? };
             let mmap2 = unsafe { memmap2::MmapOptions::new().map(&f2)? };
             let result = mmap1[..] == mmap2[..];
-            log::trace!("Compared in {:?}: {:?}", start_time.elapsed(), self.path1);
+            log::debug!("Compared in {:?}: {:?}", start_time.elapsed(), self.path1);
             return Ok(result);
         }
 
@@ -80,11 +80,11 @@ impl<'a> FileComparer<'a> {
             let n1 = n1?;
             let n2 = n2?;
             if n1 != n2 || buf1[..n1] != buf2[..n2] {
-                log::trace!("Compared in {:?}: {:?}", start_time.elapsed(), self.path1);
+                log::debug!("Compared in {:?}: {:?}", start_time.elapsed(), self.path1);
                 return Ok(false);
             }
             if n1 == 0 {
-                log::trace!("Compared in {:?}: {:?}", start_time.elapsed(), self.path1);
+                log::debug!("Compared in {:?}: {:?}", start_time.elapsed(), self.path1);
                 return Ok(true);
             }
         }
