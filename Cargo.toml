@@ -23,7 +23,7 @@ globset = "0.4"
 indicatif = "0.18"
 log = "0.4"
 memmap2 = "0.9.10"
-rayon = "1.10"
+rayon = "1.12"
 walkdir = "2.5"
 
 [dev-dependencies]
