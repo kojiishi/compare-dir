@@ -9,9 +9,7 @@ tasks:
     - task: test
     - task: lint
     - task: fmt
-  fix:
-    - cargo clippy --fix {{.CLIPPY}} {{.CLI_ARGS}}
-    - task: fmt
+  fix: cargo clippy --fix {{.CLIPPY}} {{.CLI_ARGS}}
   fmt:
     - cargo fmt {{.FMT}} {{.CLI_ARGS}}
     - git diff
