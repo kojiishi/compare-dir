@@ -241,27 +241,27 @@ mod tests {
     }
 
     #[test]
-    fn test_compare_contents_identical() -> io::Result<()> {
+    fn compare_contents_identical() -> io::Result<()> {
         check_compare(b"hello world", b"hello world", true)
     }
 
     #[test]
-    fn test_compare_contents_different() -> io::Result<()> {
+    fn compare_contents_different() -> io::Result<()> {
         check_compare(b"hello world", b"hello rust", false)
     }
 
     #[test]
-    fn test_compare_contents_different_size() -> io::Result<()> {
+    fn compare_contents_different_size() -> io::Result<()> {
         check_compare(b"hello world", b"hello", false)
     }
 
     #[test]
-    fn test_compare_contents_empty_files() -> io::Result<()> {
+    fn compare_contents_empty_files() -> io::Result<()> {
         check_compare(b"", b"", true)
     }
 
     #[test]
-    fn test_comparison_result_empty() {
+    fn comparison_result_empty() {
         let result = FileComparisonResult::new(PathBuf::from("test.txt"), Classification::InBoth);
         assert!(!result.is_identical());
         assert_eq!(result.to_string("dir1", "dir2"), "Unknown");
@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn test_comparison_result_contents_skipped() {
+    fn comparison_result_contents_skipped() {
         let mut result =
             FileComparisonResult::new(PathBuf::from("test.txt"), Classification::InBoth);
         result.modified_time_comparison = Some(Ordering::Equal);

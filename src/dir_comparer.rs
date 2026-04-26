@@ -384,7 +384,7 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn test_comparison_summary() {
+    fn comparison_summary() {
         let mut summary = ComparisonSummary::default();
         let res1 = FileComparisonResult::new(PathBuf::from("a"), Classification::OnlyInDir1);
         let res2 = FileComparisonResult::new(PathBuf::from("b"), Classification::OnlyInDir2);
@@ -402,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn test_directory_comparer_integration() -> anyhow::Result<()> {
+    fn directory_comparer_integration() -> anyhow::Result<()> {
         let dir1 = tempfile::tempdir()?;
         let dir2 = tempfile::tempdir()?;
 
@@ -474,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn test_directory_comparer_size_mode() -> anyhow::Result<()> {
+    fn directory_comparer_size_mode() -> anyhow::Result<()> {
         let dir1 = tempfile::tempdir()?;
         let dir2 = tempfile::tempdir()?;
 

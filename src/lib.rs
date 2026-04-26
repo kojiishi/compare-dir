@@ -66,7 +66,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn test_strip_prefix_share_root() -> anyhow::Result<()> {
+    fn strip_prefix_share_root() -> anyhow::Result<()> {
         let path = Path::new(r"\\server\share\dir1\dir2");
         let base = Path::new(r"\\server\share");
         assert_eq!(strip_prefix(path, base)?.to_str().unwrap(), r"dir1\dir2");
@@ -76,7 +76,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn test_strip_prefix_unc_root() -> anyhow::Result<()> {
+    fn strip_prefix_unc_root() -> anyhow::Result<()> {
         let path = Path::new(r"\\?\UNC\server\share\dir1\dir2");
         let base = Path::new(r"\\?\UNC\server\share");
         assert_eq!(strip_prefix(path, base)?.to_str().unwrap(), r"dir1\dir2");

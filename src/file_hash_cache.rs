@@ -311,7 +311,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_file_hash_cache() -> anyhow::Result<()> {
+    fn file_hash_cache() -> anyhow::Result<()> {
         let dir = tempdir()?;
         let cache = FileHashCache::new(dir.path());
 
@@ -347,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn test_file_hash_cache_clear() -> anyhow::Result<()> {
+    fn file_hash_cache_clear() -> anyhow::Result<()> {
         let dir = tempdir()?;
         let cache = FileHashCache::new(dir.path());
 
@@ -367,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn test_file_hash_cache_clear_scoped() -> anyhow::Result<()> {
+    fn file_hash_cache_clear_scoped() -> anyhow::Result<()> {
         let dir = tempdir()?;
         let cache = FileHashCache::new(dir.path());
 
@@ -391,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_or_new_empty_cache_file() -> anyhow::Result<()> {
+    fn find_or_new_empty_cache_file() -> anyhow::Result<()> {
         let dir = tempdir()?;
         let subdir = dir.path().join("subdir");
         std::fs::create_dir(&subdir)?;
@@ -420,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn test_read_cache_entry_success() -> anyhow::Result<()> {
+    fn read_cache_entry_success() -> anyhow::Result<()> {
         let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
         let line = format!("{} 12345 67890 test.txt", hash_hex);
         let (path, entry) = FileHashCache::read_cache_entry(&line)?;
@@ -433,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn test_read_cache_entry_spaces_in_path() -> anyhow::Result<()> {
+    fn read_cache_entry_spaces_in_path() -> anyhow::Result<()> {
         let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
         let line = format!("{} 12345 67890 path with spaces.txt", hash_hex);
         let (path, entry) = FileHashCache::read_cache_entry(&line)?;
@@ -444,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn test_read_cache_entry_failures() {
+    fn read_cache_entry_failures() {
         // Missing fields
         assert!(FileHashCache::read_cache_entry("").is_err());
         assert!(FileHashCache::read_cache_entry("hash").is_err());
@@ -465,7 +465,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_cache_entry() -> anyhow::Result<()> {
+    fn write_cache_entry() -> anyhow::Result<()> {
         let mut buf = Vec::new();
         let path = Path::new("test.txt");
         let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
@@ -483,7 +483,7 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn test_merge() -> anyhow::Result<()> {
+    fn merge() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let subdir = dir.path().join("sub");
         std::fs::create_dir(&subdir)?;
@@ -532,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_cleans_up_child_cache_even_if_not_dirty() -> anyhow::Result<()> {
+    fn save_cleans_up_child_cache_even_if_not_dirty() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let subdir = dir.path().join("sub");
         std::fs::create_dir(&subdir)?;
@@ -572,7 +572,7 @@ mod tests {
     }
 
     #[test]
-    fn test_timestamp_tolerance() -> anyhow::Result<()> {
+    fn timestamp_tolerance() -> anyhow::Result<()> {
         let dir = tempdir()?;
         let cache = FileHashCache::new(dir.path());
         let path = PathBuf::from("test.txt");
