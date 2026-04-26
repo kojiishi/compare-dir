@@ -71,6 +71,7 @@ fn main() -> anyhow::Result<()> {
             CompareMethod::Full => FileComparisonMethod::Full,
         };
         comparer.exclude = build_exclude(&args.exclude)?;
+        comparer.enable_progress();
         comparer.run()
     } else {
         let mut hasher = FileHasher::new(args.dir1);
@@ -79,6 +80,7 @@ fn main() -> anyhow::Result<()> {
             hasher.clear_cache()?;
         }
         hasher.exclude = build_exclude(&args.exclude)?;
+        hasher.enable_progress();
         hasher.run()
     }
 }
