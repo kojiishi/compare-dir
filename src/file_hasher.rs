@@ -300,7 +300,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_find_duplicates() -> anyhow::Result<()> {
+    fn find_duplicates() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
 
         let file1_path = dir.path().join("same1.txt");
@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_duplicates_merge_cache() -> anyhow::Result<()> {
+    fn find_duplicates_merge_cache() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let dir_path = dir.path();
 
@@ -376,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_duplicates_with_exclude() -> anyhow::Result<()> {
+    fn find_duplicates_with_exclude() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
 
         let file1_path = dir.path().join("same1.txt");
