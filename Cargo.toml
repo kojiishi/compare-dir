@@ -1,6 +1,6 @@
 [package]
 name = "compare-dir"
-version = "0.6.7"
+version = "0.6.8"
 edition = "2024"
 rust-version = "1.88"
 description = "A high-performance directory comparison tool and library"
@@ -11,7 +11,7 @@ documentation = "https://docs.rs/compare-dir/"
 readme = "README.md"
 keywords = ["directory", "comparison", "diff", "parallel"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = [".github", ".gitignore", "hooks", ".vscode"]
+exclude = [".github", ".gitignore", ".vscode", "Taskfile.yml"]
 
 [dependencies]
 anyhow = "1.0"
