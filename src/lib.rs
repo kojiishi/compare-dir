@@ -10,7 +10,7 @@ pub use file_comparer::{Classification, FileComparer, FileComparisonResult};
 pub(crate) use file_hash_cache::FileHashCache;
 pub use file_hasher::{DuplicatedFiles, FileHasher};
 pub(crate) use file_iterator::FileIterator;
-pub(crate) use progress_reporter::ProgressReporter;
+pub(crate) use progress_reporter::{ProgressReporter, SubProgress};
 
 use std::path::{Path, StripPrefixError};
 

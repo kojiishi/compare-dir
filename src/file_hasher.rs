@@ -1,11 +1,11 @@
-use crate::{FileComparer, FileHashCache, FileIterator, ProgressReporter};
+use crate::{FileComparer, FileHashCache, FileIterator, ProgressReporter, SubProgress};
 use globset::GlobSet;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, OnceLock, mpsc};
 
 #[derive(Debug, Clone)]
 enum HashProgress {
@@ -34,6 +34,7 @@ pub struct FileHasher {
     pub(crate) num_hashed: AtomicUsize,
     pub(crate) num_hash_looked_up: AtomicUsize,
     pub exclude: Option<GlobSet>,
+    pub(crate) progress: OnceLock<Arc<ProgressReporter>>,
 }
 
 impl FileHasher {
@@ -47,7 +48,15 @@ impl FileHasher {
             num_hashed: AtomicUsize::new(0),
             num_hash_looked_up: AtomicUsize::new(0),
             exclude: None,
+            progress: OnceLock::new(),
         }
+    }
+
+    /// Enables progress reporting for this hasher.
+    pub fn enable_progress(&self) {
+        self.progress
+            .set(Arc::new(ProgressReporter::new()))
+            .unwrap();
     }
 
     /// Remove a cache entry if it exists.
@@ -113,7 +122,11 @@ impl FileHasher {
 
     /// Finds duplicated files and returns a list of duplicate groups.
     pub fn find_duplicates(&self) -> anyhow::Result<Vec<DuplicatedFiles>> {
-        let progress = ProgressReporter::new();
+        let progress = self
+            .progress
+            .get()
+            .map(|r| r.add_main_bar())
+            .unwrap_or_else(SubProgress::none);
         progress.set_message("Scanning directories...");
 
         let (tx, rx) = mpsc::channel();
@@ -273,12 +286,22 @@ impl FileHasher {
     fn compute_hash(&self, path: &Path) -> io::Result<blake3::Hash> {
         let start_time = std::time::Instant::now();
         let mut f = fs::File::open(path)?;
+        let len = f.metadata()?.len();
+        let progress = self
+            .progress
+            .get()
+            .map(|reporter| {
+                let sub = reporter.add_file_bar(len);
+                sub.set_message(path.to_string_lossy().to_string());
+                sub
+            })
+            .unwrap_or_else(SubProgress::none);
         let mut hasher = blake3::Hasher::new();
         if self.buffer_size == 0 {
-            let len = f.metadata()?.len();
             if len > 0 {
                 let mmap = unsafe { memmap2::MmapOptions::new().map(&f)? };
                 hasher.update(&mmap[..]);
+                progress.inc(len);
             }
         } else {
             let mut buf = vec![0u8; self.buffer_size];
@@ -288,8 +311,10 @@ impl FileHasher {
                     break;
                 }
                 hasher.update(&buf[..n]);
+                progress.inc(n as u64);
             }
         }
+        progress.finish();
         log::debug!("Computed hash in {:?}: {:?}", start_time.elapsed(), path);
         Ok(hasher.finalize())
     }

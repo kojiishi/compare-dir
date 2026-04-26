@@ -1,12 +1,13 @@
 use crate::{
     Classification, FileComparer, FileComparisonResult, FileHasher, FileIterator, ProgressReporter,
+    SubProgress,
 };
 use globset::GlobSet;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Arc, OnceLock, mpsc};
 
 #[derive(Debug, Clone)]
 enum CompareProgress {
@@ -37,6 +38,7 @@ pub struct DirectoryComparer {
     pub buffer_size: usize,
     pub comparison_method: FileComparisonMethod,
     pub exclude: Option<GlobSet>,
+    progress: OnceLock<Arc<ProgressReporter>>,
 }
 
 impl DirectoryComparer {
@@ -49,7 +51,15 @@ impl DirectoryComparer {
             buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
             comparison_method: FileComparisonMethod::Hash,
             exclude: None,
+            progress: OnceLock::new(),
         }
+    }
+
+    /// Enables progress reporting for this comparer.
+    pub fn enable_progress(&self) {
+        self.progress
+            .set(Arc::new(ProgressReporter::new()))
+            .unwrap();
     }
 
     /// Sets the maximum number of threads for parallel processing.
@@ -69,7 +79,11 @@ impl DirectoryComparer {
             return self.run_file_comparer();
         }
 
-        let progress = ProgressReporter::new();
+        let progress = self
+            .progress
+            .get()
+            .map(|r| r.add_main_bar())
+            .unwrap_or_else(SubProgress::none);
         progress.set_message("Scanning directories...");
         let start_time = std::time::Instant::now();
         let mut summary = ComparisonSummary::default();
@@ -256,6 +270,10 @@ impl DirectoryComparer {
             );
             h1.buffer_size = self.buffer_size;
             h2.buffer_size = self.buffer_size;
+            if let Some(progress) = self.progress.get() {
+                h1.progress.set(Arc::clone(progress)).unwrap();
+                h2.progress.set(Arc::clone(progress)).unwrap();
+            }
             return Ok(Some((h1, h2)));
         }
         Ok(None)
