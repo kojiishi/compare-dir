@@ -15,15 +15,19 @@ pub(crate) use progress_reporter::ProgressReporter;
 use std::path::{Path, StripPrefixError};
 
 pub(crate) fn human_readable_size(size: u64) -> String {
-    const MB: u64 = 1024 * 1024;
-    const GB: u64 = 1024 * 1024 * 1024;
-    if size >= GB {
-        format!("{:.1}GB", size as f64 / GB as f64)
-    } else if size >= MB {
-        format!("{:.1}MB", size as f64 / MB as f64)
-    } else {
-        format!("{} bytes", size)
+    const KB: u64 = 1024;
+    if size < KB {
+        return format!("{} bytes", size);
     }
+    const KB_AS_F: f64 = KB as f64;
+    let mut size = size as f64;
+    for unit in ["KB", "MB"] {
+        size /= KB_AS_F;
+        if size < KB_AS_F {
+            return format!("{:.1}{}", size, unit);
+        }
+    }
+    format!("{:.1}GB", size / KB_AS_F)
 }
 
 /// Workaround for https://github.com/kojiishi/compare-dir/issues/8
@@ -47,8 +51,18 @@ pub(crate) fn strip_prefix<'a>(path: &'a Path, base: &Path) -> Result<&'a Path, 
 
 #[cfg(test)]
 mod tests {
-    #[cfg(windows)]
     use super::*;
+
+    #[test]
+    fn human_readable_size_tests() {
+        assert_eq!(human_readable_size(0), "0 bytes");
+        assert_eq!(human_readable_size(1), "1 bytes");
+        assert_eq!(human_readable_size(1023), "1023 bytes");
+        assert_eq!(human_readable_size(1024), "1.0KB");
+        assert_eq!(human_readable_size(1024 * 1024), "1.0MB");
+        assert_eq!(human_readable_size(1024 * 1024 * 1024), "1.0GB");
+        assert_eq!(human_readable_size(1024 * 1024 * 1024 * 1024), "1024.0GB");
+    }
 
     #[cfg(windows)]
     #[test]
