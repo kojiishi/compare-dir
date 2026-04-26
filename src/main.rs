@@ -1,10 +1,13 @@
 use clap::{ArgAction, Parser};
-use compare_dir::{DirectoryComparer, FileComparer, FileComparisonMethod, FileHasher};
+use compare_dir::{
+    DirectoryComparer, FileComparer, FileComparisonMethod, FileHasher, ProgressBuilder,
+};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use std::{
     env,
     io::{self, Write},
     path::PathBuf,
+    sync::Arc,
 };
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
@@ -51,6 +54,11 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let mut args = Args::parse();
+    let mut progress = ProgressBuilder::new();
+    if args.verbose >= 1 {
+        progress.is_file_enabled = true;
+        args.verbose -= 1;
+    }
     init_logger(args.verbose);
     if args.parallel > 0 {
         DirectoryComparer::set_max_threads(args.parallel)?;
@@ -71,6 +79,7 @@ fn main() -> anyhow::Result<()> {
             CompareMethod::Full => FileComparisonMethod::Full,
         };
         comparer.exclude = build_exclude(&args.exclude)?;
+        comparer.progress = Some(Arc::new(progress));
         comparer.run()
     } else {
         let mut hasher = FileHasher::new(args.dir1);
@@ -79,6 +88,7 @@ fn main() -> anyhow::Result<()> {
             hasher.clear_cache()?;
         }
         hasher.exclude = build_exclude(&args.exclude)?;
+        hasher.progress = Some(Arc::new(progress));
         hasher.run()
     }
 }

@@ -1,4 +1,4 @@
-use crate::{FileComparer, FileHashCache, FileIterator, ProgressReporter};
+use crate::{FileComparer, FileHashCache, FileIterator, Progress, ProgressBuilder};
 use globset::GlobSet;
 use std::collections::HashMap;
 use std::fs;
@@ -34,6 +34,7 @@ pub struct FileHasher {
     pub(crate) num_hashed: AtomicUsize,
     pub(crate) num_hash_looked_up: AtomicUsize,
     pub exclude: Option<GlobSet>,
+    pub progress: Option<Arc<ProgressBuilder>>,
 }
 
 impl FileHasher {
@@ -47,6 +48,7 @@ impl FileHasher {
             num_hashed: AtomicUsize::new(0),
             num_hash_looked_up: AtomicUsize::new(0),
             exclude: None,
+            progress: None,
         }
     }
 
@@ -113,7 +115,11 @@ impl FileHasher {
 
     /// Finds duplicated files and returns a list of duplicate groups.
     pub fn find_duplicates(&self) -> anyhow::Result<Vec<DuplicatedFiles>> {
-        let progress = ProgressReporter::new();
+        let progress = self
+            .progress
+            .as_ref()
+            .map(|progress| progress.add_spinner())
+            .unwrap_or_else(Progress::none);
         progress.set_message("Scanning directories...");
 
         let (tx, rx) = mpsc::channel();
@@ -273,12 +279,18 @@ impl FileHasher {
     fn compute_hash(&self, path: &Path) -> io::Result<blake3::Hash> {
         let start_time = std::time::Instant::now();
         let mut f = fs::File::open(path)?;
+        let len = f.metadata()?.len();
+        let progress = self
+            .progress
+            .as_ref()
+            .map(|progress| progress.add_file(path, len))
+            .unwrap_or_else(Progress::none);
         let mut hasher = blake3::Hasher::new();
         if self.buffer_size == 0 {
-            let len = f.metadata()?.len();
             if len > 0 {
                 let mmap = unsafe { memmap2::MmapOptions::new().map(&f)? };
                 hasher.update(&mmap[..]);
+                progress.inc(len);
             }
         } else {
             let mut buf = vec![0u8; self.buffer_size];
@@ -288,8 +300,10 @@ impl FileHasher {
                     break;
                 }
                 hasher.update(&buf[..n]);
+                progress.inc(n as u64);
             }
         }
+        progress.finish();
         log::debug!("Computed hash in {:?}: {:?}", start_time.elapsed(), path);
         Ok(hasher.finalize())
     }

@@ -1,12 +1,13 @@
 use crate::{
-    Classification, FileComparer, FileComparisonResult, FileHasher, FileIterator, ProgressReporter,
+    Classification, FileComparer, FileComparisonResult, FileHasher, FileIterator, Progress,
+    ProgressBuilder,
 };
 use globset::GlobSet;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 
 #[derive(Debug, Clone)]
 enum CompareProgress {
@@ -37,6 +38,7 @@ pub struct DirectoryComparer {
     pub buffer_size: usize,
     pub comparison_method: FileComparisonMethod,
     pub exclude: Option<GlobSet>,
+    pub progress: Option<Arc<ProgressBuilder>>,
 }
 
 impl DirectoryComparer {
@@ -49,6 +51,7 @@ impl DirectoryComparer {
             buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
             comparison_method: FileComparisonMethod::Hash,
             exclude: None,
+            progress: None,
         }
     }
 
@@ -69,7 +72,11 @@ impl DirectoryComparer {
             return self.run_file_comparer();
         }
 
-        let progress = ProgressReporter::new();
+        let progress = self
+            .progress
+            .as_ref()
+            .map(|progress| progress.add_spinner())
+            .unwrap_or_else(Progress::none);
         progress.set_message("Scanning directories...");
         let start_time = std::time::Instant::now();
         let mut summary = ComparisonSummary::default();
@@ -256,6 +263,10 @@ impl DirectoryComparer {
             );
             h1.buffer_size = self.buffer_size;
             h2.buffer_size = self.buffer_size;
+            if let Some(progress) = self.progress.as_ref() {
+                h1.progress = Some(Arc::clone(progress));
+                h2.progress = Some(Arc::clone(progress));
+            }
             return Ok(Some((h1, h2)));
         }
         Ok(None)
