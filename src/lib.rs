@@ -3,14 +3,14 @@ mod file_comparer;
 mod file_hash_cache;
 mod file_hasher;
 mod file_iterator;
-mod progress_reporter;
+mod progress;
 
 pub use dir_comparer::{DirectoryComparer, FileComparisonMethod};
 pub use file_comparer::{Classification, FileComparer, FileComparisonResult};
 pub(crate) use file_hash_cache::FileHashCache;
 pub use file_hasher::{DuplicatedFiles, FileHasher};
 pub(crate) use file_iterator::FileIterator;
-pub(crate) use progress_reporter::ProgressReporter;
+pub(crate) use progress::ProgressReporter;
 
 use std::path::{Path, StripPrefixError};
 
