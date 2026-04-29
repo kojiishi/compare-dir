@@ -2,12 +2,12 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::path::Path;
 use std::time::Duration;
 
-const SPINNER_STYLE: &str = "{elapsed_precise} {pos:>7} {spinner:.green} {msg}";
+const SPINNER_STYLE: &str = "{elapsed_precise} {spinner:.green} {pos:>7} {msg}";
 const NORMAL_STYLE: &str =
-    "{elapsed_precise} +{eta:>3} {percent:>3}% {pos:>7}/{len:7} {bar:40.cyan/blue} {msg}";
+    "{elapsed_precise} +{eta:>3} {percent:>3}% {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}";
 const FILE_STYLE: &str = "  {elapsed:>3} +{eta:>3} {percent:>3}% {msg}";
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct Progress {
     inner: Option<ProgressBar>,
     multi: Option<MultiProgress>,
@@ -39,7 +39,7 @@ impl Progress {
 
     pub fn set_length(&self, len: u64) {
         if let Some(inner) = &self.inner {
-            if len > 0 && inner.length().is_none() {
+            if inner.length().is_none() {
                 inner.set_style(ProgressStyle::with_template(NORMAL_STYLE).unwrap());
             }
             inner.set_length(len);
