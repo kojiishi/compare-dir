@@ -5,7 +5,7 @@ use std::time::Duration;
 const SPINNER_STYLE: &str = "{elapsed_precise} {spinner:.green} {pos:>7} {msg}";
 const NORMAL_STYLE: &str =
     "{elapsed_precise} +{eta:>3} {percent:>3}% {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}";
-const FILE_STYLE: &str = "  {elapsed:>3} +{eta:>3} {percent:>3}% {msg}";
+const FILE_STYLE: &str = "  {elapsed:>3} +{eta:>3} {percent:>3}% {wide_msg}";
 
 #[derive(Debug)]
 pub(crate) struct Progress {
