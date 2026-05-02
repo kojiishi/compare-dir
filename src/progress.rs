@@ -1,4 +1,5 @@
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::io::{IsTerminal, stderr};
 use std::path::Path;
 use std::time::Duration;
 
@@ -72,18 +73,29 @@ impl Progress {
 #[derive(Debug)]
 pub struct ProgressBuilder {
     multi: MultiProgress,
+    pub is_enabled: bool,
     pub is_file_enabled: bool,
+}
+
+impl Default for ProgressBuilder {
+    fn default() -> Self {
+        Self {
+            multi: MultiProgress::default(),
+            is_enabled: stderr().is_terminal(),
+            is_file_enabled: true,
+        }
+    }
 }
 
 impl ProgressBuilder {
     pub fn new() -> Self {
-        Self {
-            multi: MultiProgress::new(),
-            is_file_enabled: false,
-        }
+        Self::default()
     }
 
     pub(crate) fn add_spinner(&self) -> Progress {
+        if !self.is_enabled {
+            return Progress::none();
+        }
         let progress = self.multi.add(ProgressBar::new_spinner());
         progress.enable_steady_tick(Duration::from_millis(120));
         progress.set_style(ProgressStyle::with_template(SPINNER_STYLE).unwrap());
@@ -94,7 +106,7 @@ impl ProgressBuilder {
     }
 
     pub(crate) fn add_file(&self, path: &Path, file_size: u64) -> Progress {
-        if !self.is_file_enabled {
+        if !self.is_enabled || !self.is_file_enabled {
             return Progress::none();
         }
         let progress = self.multi.add(ProgressBar::new(file_size));
@@ -114,11 +126,5 @@ impl ProgressBuilder {
             inner: Some(progress),
             multi: Some(self.multi.clone()),
         }
-    }
-}
-
-impl Default for ProgressBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }

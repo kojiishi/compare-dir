@@ -54,8 +54,7 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let mut args = Args::parse();
-    let mut progress = ProgressBuilder::new();
-    progress.is_file_enabled = true;
+    let progress = ProgressBuilder::new();
     init_logger(args.verbose);
     if args.parallel > 0 {
         DirectoryComparer::set_max_threads(args.parallel)?;
