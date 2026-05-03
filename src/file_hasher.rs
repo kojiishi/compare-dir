@@ -2,6 +2,7 @@ use crate::{
     DirectoryComparer, FileComparer, FileHashCache, FileIterator, Progress, ProgressBuilder,
 };
 use globset::GlobSet;
+use indicatif::FormattedDuration;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
@@ -115,7 +116,7 @@ impl FileHasher {
                 crate::human_readable_size(total_wasted_space)
             );
         }
-        eprintln!("Finished in {:?}.", start_time.elapsed());
+        eprintln!("Finished in {}.", FormattedDuration(start_time.elapsed()));
         Ok(())
     }
 
@@ -310,7 +311,11 @@ impl FileHasher {
             }
         }
         progress.finish();
-        log::debug!("Computed hash in {:?}: {:?}", start_time.elapsed(), path);
+        log::debug!(
+            "Computed hash in {}: {:?}",
+            FormattedDuration(start_time.elapsed()),
+            path
+        );
         Ok(hasher.finalize())
     }
 }

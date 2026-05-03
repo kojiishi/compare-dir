@@ -3,7 +3,7 @@ use crate::{
     ProgressBuilder,
 };
 use globset::GlobSet;
-
+use indicatif::FormattedDuration;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -121,7 +121,10 @@ impl DirectoryComparer {
         progress.finish();
         eprintln!("\n--- Comparison Summary ---");
         summary.print(&mut std::io::stderr(), dir1_str, dir2_str)?;
-        eprintln!("Comparison finished in {:?}.", start_time.elapsed());
+        eprintln!(
+            "Comparison finished in {}.",
+            FormattedDuration(start_time.elapsed())
+        );
         Ok(())
     }
 
