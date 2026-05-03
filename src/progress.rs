@@ -56,10 +56,13 @@ impl Progress {
         }
     }
 
-    pub fn suspend<F, R>(&self, f: F) -> R
+    pub fn suspend_for<F, R, S: IsTerminal>(&self, stream: S, f: F) -> R
     where
         F: FnOnce() -> R,
     {
+        if !stream.is_terminal() {
+            return f();
+        }
         if let Some(multi) = &self.multi {
             multi.suspend(f)
         } else if let Some(inner) = &self.inner {

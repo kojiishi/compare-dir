@@ -6,7 +6,7 @@ use globset::GlobSet;
 use indicatif::FormattedDuration;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, stdout};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
@@ -145,7 +145,7 @@ impl FileHasher {
                             CheckStatus::Unchanged => unreachable!(),
                         };
                         progress.inc(1);
-                        progress.suspend(|| {
+                        progress.suspend_for(stdout(), || {
                             println!("{} {}", symbol, path.display());
                         });
                     }

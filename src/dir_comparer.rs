@@ -4,9 +4,12 @@ use crate::{
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
-use std::cmp::Ordering;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, mpsc};
+use std::{
+    cmp::Ordering,
+    io::stdout,
+    path::{Path, PathBuf},
+    sync::{Arc, mpsc},
+};
 
 #[derive(Debug, Clone)]
 enum CompareProgress {
@@ -96,7 +99,7 @@ impl DirectoryComparer {
                     CompareProgress::Result(_, result) => {
                         summary.update(&result);
                         if self.is_symbols_format {
-                            progress.suspend(|| {
+                            progress.suspend_for(stdout(), || {
                                 println!(
                                     "{} {}",
                                     result.to_symbol_string(),
@@ -104,7 +107,7 @@ impl DirectoryComparer {
                                 );
                             })
                         } else if !result.is_identical() {
-                            progress.suspend(|| {
+                            progress.suspend_for(stdout(), || {
                                 println!(
                                     "{}: {}",
                                     result.relative_path.display(),
