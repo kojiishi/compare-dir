@@ -1,4 +1,5 @@
 use blake3::Hash;
+use indicatif::FormattedDuration;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
@@ -210,10 +211,10 @@ impl FileHashCache {
         std::fs::rename(&temp_path, &path)?;
         state.is_dirty = false;
         log::info!(
-            "Saved {} hashes to {:?} in {:?}",
+            "Saved {} hashes to {:?} in {}",
             state.entries.len(),
             path,
-            start_time.elapsed()
+            FormattedDuration(start_time.elapsed())
         );
         Ok(())
     }
@@ -255,10 +256,10 @@ impl FileHashCache {
             }
         }
         log::info!(
-            "Loaded {} hashes from {:?} in {:?}",
+            "Loaded {} hashes from {:?} in {}",
             entries.len(),
             path,
-            start_time.elapsed()
+            FormattedDuration(start_time.elapsed())
         );
         entries
     }
