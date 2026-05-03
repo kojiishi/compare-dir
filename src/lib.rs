@@ -15,6 +15,12 @@ pub use progress::ProgressBuilder;
 
 use std::path::{Path, StripPrefixError};
 
+pub(crate) fn build_thread_pool(
+    threads: usize,
+) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
+    rayon::ThreadPoolBuilder::new().num_threads(threads).build()
+}
+
 pub(crate) fn human_readable_size(size: u64) -> String {
     const KB: u64 = 1024;
     if size < KB {

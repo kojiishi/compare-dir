@@ -40,12 +40,12 @@ struct Args {
     symbol: bool,
 
     /// Buffer size when reading files in KB. If 0, uses mmap.
-    #[arg(long, default_value_t = FileComparer::DEFAULT_BUFFER_SIZE_KB)]
+    #[arg(short = 'B', long, default_value_t = FileComparer::DEFAULT_BUFFER_SIZE_KB)]
     buffer: usize,
 
-    /// Number of parallel threads. If 0, uses the default.
-    #[arg(short, long, default_value_t = 8)]
-    parallel: usize,
+    /// Number of parallel jobs. If 0, uses the default.
+    #[arg(short = 'J', long, default_value_t = DirectoryComparer::DEFAULT_JOBS)]
+    jobs: usize,
 
     /// Enable verbose logging to stderr.
     #[arg(short, long, action = ArgAction::Count)]
@@ -60,9 +60,6 @@ fn main() -> anyhow::Result<()> {
         args.verbose -= 1;
     }
     init_logger(args.verbose);
-    if args.parallel > 0 {
-        DirectoryComparer::set_max_threads(args.parallel)?;
-    }
 
     // Ensure paths are absolute. It helps when computing relative paths and
     // walking ancestors.
@@ -79,6 +76,7 @@ fn main() -> anyhow::Result<()> {
             CompareMethod::Full => FileComparisonMethod::Full,
         };
         comparer.exclude = build_exclude(&args.exclude)?;
+        comparer.jobs = args.jobs;
         comparer.progress = Some(Arc::new(progress));
         comparer.run()
     } else {
@@ -88,6 +86,7 @@ fn main() -> anyhow::Result<()> {
             hasher.clear_cache()?;
         }
         hasher.exclude = build_exclude(&args.exclude)?;
+        hasher.jobs = args.jobs;
         hasher.progress = Some(Arc::new(progress));
         hasher.run()
     }
