@@ -39,9 +39,12 @@ pub struct DirectoryComparer {
     pub comparison_method: FileComparisonMethod,
     pub exclude: Option<GlobSet>,
     pub progress: Option<Arc<ProgressBuilder>>,
+    pub jobs: usize,
 }
 
 impl DirectoryComparer {
+    pub const DEFAULT_JOBS: usize = 8;
+
     /// Creates a new `DirectoryComparer` for the two given directories.
     pub fn new(dir1: PathBuf, dir2: PathBuf) -> Self {
         Self {
@@ -52,17 +55,8 @@ impl DirectoryComparer {
             comparison_method: FileComparisonMethod::Hash,
             exclude: None,
             progress: None,
+            jobs: Self::DEFAULT_JOBS,
         }
-    }
-
-    /// Sets the maximum number of threads for parallel processing.
-    /// This initializes the global Rayon thread pool.
-    pub fn set_max_threads(parallel: usize) -> anyhow::Result<()> {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(parallel)
-            .build_global()
-            .map_err(|e| anyhow::anyhow!("Failed to initialize thread pool: {}", e))?;
-        Ok(())
     }
 
     /// Executes the directory comparison and prints results to stdout.
@@ -182,12 +176,12 @@ impl DirectoryComparer {
                 h2.clear_cache()?;
             }
         }
-
-        let mut cur1 = it1.next();
-        let mut cur2 = it2.next();
-        let mut index = 0;
-        tx.send(CompareProgress::StartOfComparison)?;
-        rayon::scope(|scope| {
+        let pool = crate::build_thread_pool(self.jobs)?;
+        pool.scope(|scope| {
+            let mut cur1 = it1.next();
+            let mut cur2 = it2.next();
+            let mut index = 0;
+            tx.send(CompareProgress::StartOfComparison)?;
             loop {
                 let cmp = match (&cur1, &cur2) {
                     (Some((rel1, _)), Some((rel2, _))) => rel1.cmp(rel2),

@@ -1,4 +1,6 @@
-use crate::{FileComparer, FileHashCache, FileIterator, Progress, ProgressBuilder};
+use crate::{
+    DirectoryComparer, FileComparer, FileHashCache, FileIterator, Progress, ProgressBuilder,
+};
 use globset::GlobSet;
 use std::collections::HashMap;
 use std::fs;
@@ -35,9 +37,12 @@ pub struct FileHasher {
     pub(crate) num_hash_looked_up: AtomicUsize,
     pub exclude: Option<GlobSet>,
     pub progress: Option<Arc<ProgressBuilder>>,
+    pub jobs: usize,
 }
 
 impl FileHasher {
+    const DEFAULT_JOBS: usize = DirectoryComparer::DEFAULT_JOBS;
+
     /// Creates a new `FileHasher` for the given directory.
     pub fn new(dir: PathBuf) -> Self {
         let cache = FileHashCache::find_or_new(&dir);
@@ -49,6 +54,7 @@ impl FileHasher {
             num_hash_looked_up: AtomicUsize::new(0),
             exclude: None,
             progress: None,
+            jobs: Self::DEFAULT_JOBS,
         }
     }
 
@@ -184,8 +190,8 @@ impl FileHasher {
         tx.send(HashProgress::StartDiscovering)?;
         let mut by_size: HashMap<u64, EntryState> = HashMap::new();
         let mut total_hashed = 0;
-
-        rayon::scope(|scope| -> anyhow::Result<()> {
+        let pool = crate::build_thread_pool(self.jobs)?;
+        pool.scope(|scope| -> anyhow::Result<()> {
             let mut it = FileIterator::new(self.dir.clone());
             it.hasher = Some(self);
             it.exclude = self.exclude.as_ref();
