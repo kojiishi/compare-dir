@@ -97,7 +97,7 @@ impl ProgressBuilder {
             return Progress::none();
         }
         let progress = self.multi.add(ProgressBar::new_spinner());
-        progress.enable_steady_tick(Duration::from_millis(120));
+        progress.enable_steady_tick(Duration::from_secs(1));
         progress.set_style(ProgressStyle::with_template(SPINNER_STYLE).unwrap());
         Progress {
             inner: Some(progress),
