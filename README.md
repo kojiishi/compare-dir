@@ -14,18 +14,33 @@
 A command line tool to compare two directories and show the differences.
 It can also find duplicated files within a single directory.
 
+## Usages
+
 ### Compare Directories
 
-In this mode,
-the tool compares two directories
+When you backup your important data,
+it is important to keep in mind that
+the backup may not be done correctly,
+or the backup may somehow corrupt.
+They can happen more often than you might imagine.
+
+The following example compares two directories
 by comparing the modified time and sizes.
 It also compares file contents if the file sizes are the same.
 This mode is useful to verify backup copies.
 
+```shell-session
+compare-dir <dir1> <dir2>
+```
+
 ### Find Duplicates
 
-In this mode,
+When only one directory is specified,
 the tool discovers exact duplicated files.
+
+```shell-session
+compare-dir <dir>
+```
 
 ## Installation
 
@@ -37,21 +52,9 @@ See [Releases] for the change history.
 
 [Releases]: https://github.com/kojiishi/compare-dir/releases
 
-## Usage
+## Output Format
 
-Compare two directories:
-```bash
-compare-dir <dir1> <dir2>
-```
-
-Find duplicated files in a single directory:
-```bash
-compare-dir <dir>
-```
-
-Please use the `-h` option to see all options.
-
-## Symbols
+### Symbols
 
 When comparing two directories,
 the output is human-readable by default.
