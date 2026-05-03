@@ -24,7 +24,7 @@ pub struct FileComparer<'a> {
 }
 
 impl<'a> FileComparer<'a> {
-    pub const DEFAULT_BUFFER_SIZE_KB: usize = 64;
+    pub const DEFAULT_BUFFER_SIZE_KB: usize = 2 * 1024;
     pub const DEFAULT_BUFFER_SIZE: usize = Self::DEFAULT_BUFFER_SIZE_KB * 1024;
 
     pub fn new(path1: &'a Path, path2: &'a Path) -> Self {
