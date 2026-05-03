@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::FileComparer;
+
 #[derive(Debug, Clone)]
 pub struct CacheEntry {
     pub hash: Hash,
@@ -177,6 +179,10 @@ impl FileHashCache {
         state.is_dirty = true;
     }
 
+    // For performance, use the larger buffer than the default, which is 8 KiB
+    // for `BufWriter::new`.
+    const BUFFER_SIZE: usize = FileComparer::DEFAULT_BUFFER_SIZE;
+
     /// Writes the cache out to `<base_dir>/.hashes` if there are dirty changes.
     pub fn save(&self) -> io::Result<()> {
         let mut state = self.state.lock().unwrap();
@@ -192,7 +198,7 @@ impl FileHashCache {
         let temp_path = self.base_dir.join(Self::TMP_FILE_NAME);
         let mut file = File::create(&temp_path)?;
         {
-            let mut writer = std::io::BufWriter::new(&mut file);
+            let mut writer = std::io::BufWriter::with_capacity(Self::BUFFER_SIZE, &mut file);
             for (rel_path, entry) in state.entries.iter() {
                 Self::write_cache_entry(&mut writer, rel_path, entry)?;
             }
@@ -237,7 +243,7 @@ impl FileHashCache {
             return entries;
         };
 
-        let reader = BufReader::new(file);
+        let reader = BufReader::with_capacity(Self::BUFFER_SIZE, file);
         for line in reader.lines().map_while(Result::ok) {
             match Self::read_cache_entry(&line) {
                 Ok((path, entry)) => {
