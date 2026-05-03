@@ -82,7 +82,7 @@ impl Default for ProgressBuilder {
         Self {
             multi: MultiProgress::default(),
             is_enabled: stderr().is_terminal(),
-            is_file_enabled: true,
+            is_file_enabled: false,
         }
     }
 }
