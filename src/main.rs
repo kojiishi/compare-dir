@@ -18,6 +18,7 @@ enum CompareMethod {
     Full,
     Check,
     Update,
+    Dup,
 }
 
 #[derive(Parser, Debug)]
@@ -67,9 +68,6 @@ fn main() -> anyhow::Result<()> {
     // walking ancestors.
     ensure_absolute_path(&mut args.dir1)?;
     if let Some(mut dir2) = args.dir2 {
-        if args.compare == CompareMethod::Check || args.compare == CompareMethod::Update {
-            anyhow::bail!("Check/Update modes only support one directory.");
-        }
         ensure_absolute_path(&mut dir2)?;
         let mut comparer = DirectoryComparer::new(args.dir1, dir2);
         comparer.is_symbols_format = args.symbol;
@@ -79,7 +77,7 @@ fn main() -> anyhow::Result<()> {
             CompareMethod::Hash => FileComparisonMethod::Hash,
             CompareMethod::Rehash => FileComparisonMethod::Rehash,
             CompareMethod::Full => FileComparisonMethod::Full,
-            CompareMethod::Check | CompareMethod::Update => unreachable!(),
+            _ => anyhow::bail!("\"{:?}\" mode only supports one directory.", args.compare),
         };
         comparer.exclude = build_exclude(&args.exclude)?;
         comparer.jobs = args.jobs;
@@ -98,7 +96,8 @@ fn main() -> anyhow::Result<()> {
                 hasher.clear_cache()?;
                 hasher.run()
             }
-            _ => hasher.run(),
+            CompareMethod::Dup => hasher.run(),
+            _ => anyhow::bail!("\"{:?}\" mode requires two directories.", args.compare),
         }
     }
 }
