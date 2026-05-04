@@ -34,6 +34,7 @@ impl<'a> FileIterator<'a> {
         scope.spawn(move || {
             for item in self {
                 if tx.send(item).is_err() {
+                    log::error!("Send failed");
                     break;
                 }
             }
