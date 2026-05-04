@@ -214,6 +214,25 @@ dir1/dir2/file: Contents differ
 > retaining hash caches for other files in the directory
 > and its sub directories.
 
+### Backup
+[backup]: #backup
+
+When backing up, there are two strategies you can take.
+
+#### Exclude `.hash_cache`
+
+1. Exclude `.hash_cache` when backing up.
+2. Use `compare-dir <dir1> <dir2>` to verify.
+3. Once directories are compared,
+   you can use `compare-dir -c check <backup-dir>`
+   to verify the backup data isn't changed or corrupted.
+
+#### Include `.hash_cache`
+
+1. Update the cache in the source by `compare-dir -c update <source-dir>`.
+2. Include `.hash_cache` when backing up.
+3. Use `compare-dir -c check <backup-dir>` to verify.
+
 ### Hash Cache Directory
 [Hash Cache Directory]: #hash-cache-directory
 
@@ -230,21 +249,3 @@ compare-dir /data
 ```
 All three runs of `compare-dir` use
 the same hash cache file at `~/data/.hash_cache`.
-
-### Backup
-[backup]: #backup
-
-When backing up, there are two strategies you can take.
-
-#### Exclude `.hash_cache`
-
-1. Exclude `.hash_cache` when backing up.
-2. Use `compare-dir <dir1> <dir2>` to verify.
-3. Later, you can use `compare-dir -c check <backup-dir>`
-   to verify the backup data isn't changed or corrupted.
-
-#### Include `.hash_cache`
-
-1. Update the cache in the source by `compare-dir -c update <source-dir>`.
-2. Include `.hash_cache` when backing up.
-3. Use `compare-dir -c check <backup-dir>` to verify.
