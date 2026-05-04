@@ -144,7 +144,7 @@ It prints a symbol, followed by the path.
 The `-c check` option doesn't update the [hash cache],
 so that you can run it multiple times.
 If you want to update the [hash cache],
-please use `-c update` instead.
+please use `-c update` option instead.
 This option prints the same output as `-c check`,
 but also updates the [hash cache].
 
@@ -162,35 +162,42 @@ compare-dir -c dup <dir>
 
 ## Hash
 
-File hashes are computed
-when comparing files
-(with the [`-c hash` option](#compare-files)),
-and when finding duplicates.
+`compare-dir` uses the [blake3] hash algorithm.
+
+[blake3]: https://crates.io/crates/blake3
 
 ### Hash Cache
 [hash cache]: #hash-cache
 
-File hashes are saved to a file named `.hash_cache`
-to make subsequent runs faster.
+File hashes are saved to a file named `.hash_cache`.
 
-> [!NOTE]
-> When backing up,
-> if you intend to use this tool
-> to verify backup copies,
-> do not copy `.hash_cache`.
-> You can also create the `.hash_cache`
-> in the parent directory of the target directory.
-> See [hash cache directory].
+This is used in many ways,
+depending on the `--compare` option.
+
+| `--compare` | Hash cache usage |
+| --- | --- |
+| full, size | Not used. |
+| hash, dup | Used if modified time doesn't change. Updated otherwise. |
+| rehash | Updated. |
+| check | Used. |
+| update | Used and updated. |
+
+### Invalidation
+[invalidation]: #invalidation
+[invalidate]: #invalidation
+
+When comparing files with the [`-c hash` option][compare files] (default),
+hashes in the hash cache are used if the modified time doesn't change.
 
 If file contents are changed without changing their modified time,
 the cache needs to be invalidated.
 You can invalidate the hash cache
-by the [`-c rehash` option](#compare-files),
+by the [`-c rehash` option][compare files],
 or by deleting the cache file.
 
 The following example shows a scenario where
 a different content is found,
-make a backup copy,
+make a new backup copy,
 and rehash the cache.
 ```shell_session
 % compare-dir /master /backup
@@ -223,3 +230,21 @@ compare-dir /data
 ```
 All three runs of `compare-dir` use
 the same hash cache file at `~/data/.hash_cache`.
+
+### Backup
+[backup]: #backup
+
+When backing up, there are two strategies you can take.
+
+#### Exclude `.hash_cache`
+
+1. Exclude `.hash_cache` when backing up.
+2. Use `compare-dir <dir1> <dir2>` to verify.
+3. Later, you can use `compare-dir -c check <backup-dir>`
+   to verify the backup data isn't changed or corrupted.
+
+#### Include `.hash_cache`
+
+1. Update the cache in the source by `compare-dir -c update <source-dir>`.
+2. Include `.hash_cache` when backing up.
+3. Use `compare-dir -c check <backup-dir>` to verify.
