@@ -92,10 +92,6 @@ fn main() -> anyhow::Result<()> {
         match args.compare {
             CompareMethod::Check => hasher.check(false),
             CompareMethod::Update => hasher.check(true),
-            CompareMethod::Rehash => {
-                hasher.clear_cache()?;
-                hasher.run()
-            }
             CompareMethod::Dup => hasher.run(),
             _ => anyhow::bail!("\"{:?}\" mode requires two directories.", args.compare),
         }
