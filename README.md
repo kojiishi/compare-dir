@@ -14,34 +14,6 @@
 A command line tool to compare two directories and show the differences.
 It can also find duplicated files within a single directory.
 
-## Usages
-
-### Compare Directories
-
-When you backup your important data,
-it is important to keep in mind that
-the backup may not be done correctly,
-or the backup may somehow corrupt.
-They can happen more often than you might imagine.
-
-The following example compares two directories
-by comparing the modified time and sizes.
-It also compares file contents if the file sizes are the same.
-This mode is useful to verify backup copies.
-
-```shell-session
-compare-dir <dir1> <dir2>
-```
-
-### Find Duplicates
-
-When only one directory is specified,
-the tool discovers exact duplicated files.
-
-```shell-session
-compare-dir <dir>
-```
-
 ## Installation
 
 ```shell-session
@@ -50,11 +22,53 @@ cargo install compare-dir
 
 See [Releases] for the change history.
 
-[Releases]: https://github.com/kojiishi/compare-dir/releases
+## Usages
 
-## Output Format
+`compare-dir` supports the following features:
 
-### Symbols
+* [Compare Directories]
+* [Find Duplicates]
+
+### Compare Directories
+[compare directories]: #compare-directories
+
+When you backup your important data,
+it is important to keep in mind that
+the backup may not be done correctly,
+or the backup may somehow corrupt.
+They can happen more often than you might imagine.
+
+The following example compares two directories.
+The comparison is done first by the modified time and sizes.
+It also compares file contents if the file sizes are the same,
+to verify backup copies are not corrupted.
+Please see [compare files] for more details.
+
+```shell-session
+compare-dir <dir1> <dir2>
+```
+
+#### Compare Files
+[compare files]: #compare-files
+
+When comparing files,
+comparing byte-to-byte is faster
+if you compare them only once,
+but comparing [hashes](#hash) is faster
+if you compare them multiple times
+because hashes are saved in the [hash cache].
+
+The `--compare` (or `-c`) option can change
+how files are compared.
+
+| `--compare` | Meaning |
+| --- | --- |
+| size | Compare only by file sizes. |
+| hash | Compare file contents by their hashes. |
+| rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
+| full | Compare file contents byte-by-byte. |
+
+#### Symbols
 
 When comparing two directories,
 the output is human-readable by default.
@@ -98,25 +112,17 @@ To do this in PowerShell:
 compare-dir -s <dir1> <dir2> | sls '^..!' | %{$_ -replace '^....',''}
 ```
 
-## Compare Files
-[compare files]: #compare-files
+### Find Duplicates
+[find duplicates]: #find-duplicates
 
-When comparing files,
-comparing byte-to-byte is faster
-if you compare them only once,
-but comparing [hashes](#hash) is faster
-if you compare them multiple times
-because hashes are saved in the [hash cache].
+When only one directory is specified,
+the tool discovers exact duplicated files.
 
-The `--compare` (or `-c`) option can change
-how files are compared.
+```shell-session
+compare-dir <dir>
+```
 
-| `--compare` | Meaning |
-| --- | --- |
-| size | Compare only by file sizes. |
-| hash | Compare file contents by their hashes. |
-| rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
-| full | Compare file contents byte-by-byte. |
+[Releases]: https://github.com/kojiishi/compare-dir/releases
 
 ## Hash
 
