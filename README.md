@@ -151,11 +151,11 @@ but also updates the [hash cache].
 ### Find Duplicates
 [find duplicates]: #find-duplicates
 
-When only one directory is specified,
-the tool discovers exact duplicated files.
+`compare-dir` discovers exact duplicated files
+with the `-c dup` option.
 
 ```shell-session
-compare-dir <dir>
+compare-dir -c dup <dir>
 ```
 
 [Releases]: https://github.com/kojiishi/compare-dir/releases
