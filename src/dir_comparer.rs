@@ -179,69 +179,84 @@ impl DirectoryComparer {
                 h2.clear_cache()?;
             }
         }
-        let pool = crate::build_thread_pool(self.jobs)?;
-        pool.scope(|scope| {
-            let mut cur1 = it1.next();
-            let mut cur2 = it2.next();
-            let mut index = 0;
-            tx.send(CompareProgress::StartOfComparison)?;
-            loop {
-                let cmp = match (&cur1, &cur2) {
-                    (Some((rel1, _)), Some((rel2, _))) => rel1.cmp(rel2),
-                    (Some(_), None) => Ordering::Less,
-                    (None, Some(_)) => Ordering::Greater,
-                    (None, None) => break,
-                };
-                match cmp {
-                    Ordering::Less => {
-                        let (rel1, _) = cur1.take().unwrap();
-                        let result = FileComparisonResult::new(rel1, Classification::OnlyInDir1);
-                        tx.send(CompareProgress::Result(index, result))?;
-                        tx.send(CompareProgress::FileDone)?;
-                        index += 1;
-                        cur1 = it1.next();
-                    }
-                    Ordering::Greater => {
-                        let (rel2, _) = cur2.take().unwrap();
-                        let result = FileComparisonResult::new(rel2, Classification::OnlyInDir2);
-                        tx.send(CompareProgress::Result(index, result))?;
-                        tx.send(CompareProgress::FileDone)?;
-                        index += 1;
-                        cur2 = it2.next();
-                    }
-                    Ordering::Equal => {
-                        let (rel_path, path1) = cur1.take().unwrap();
-                        let (_, path2) = cur2.take().unwrap();
-                        let buffer_size = self.buffer_size;
-                        let tx_clone = tx.clone();
-                        let i = index;
-                        let should_compare = self.comparison_method != FileComparisonMethod::Size;
-                        let hashers_ref = hashers.as_ref();
-                        scope.spawn(move |_| {
-                            let mut comparer = FileComparer::new(&path1, &path2);
-                            comparer.buffer_size = buffer_size;
-                            if let Some((h1, h2)) = hashers_ref {
-                                comparer.hashers = Some((h1, h2));
-                            }
-                            let mut result =
-                                FileComparisonResult::new(rel_path.clone(), Classification::InBoth);
-                            if let Err(error) = result.update(&comparer, should_compare) {
-                                log::error!("Error during comparison of {:?}: {}", rel_path, error);
-                            }
-                            if tx_clone.send(CompareProgress::Result(i, result)).is_err()
-                                || tx_clone.send(CompareProgress::FileDone).is_err()
-                            {
-                                log::error!("Send failed during comparison of {:?}", rel_path);
-                            }
-                        });
-                        index += 1;
-                        cur1 = it1.next();
-                        cur2 = it2.next();
+        let hashers_ref = hashers.as_ref();
+        std::thread::scope(|global_scope| {
+            let it1_rx = it1.spawn_in_scope(global_scope);
+            let it2_rx = it2.spawn_in_scope(global_scope);
+            let pool = crate::build_thread_pool(self.jobs)?;
+            pool.scope(move |scope| {
+                let mut cur1 = it1_rx.recv().ok();
+                let mut cur2 = it2_rx.recv().ok();
+                let mut index = 0;
+                tx.send(CompareProgress::StartOfComparison)?;
+                loop {
+                    let cmp = match (&cur1, &cur2) {
+                        (Some((rel1, _)), Some((rel2, _))) => rel1.cmp(rel2),
+                        (Some(_), None) => Ordering::Less,
+                        (None, Some(_)) => Ordering::Greater,
+                        (None, None) => break,
+                    };
+                    match cmp {
+                        Ordering::Less => {
+                            let (rel1, _) = cur1.take().unwrap();
+                            let result =
+                                FileComparisonResult::new(rel1, Classification::OnlyInDir1);
+                            tx.send(CompareProgress::Result(index, result))?;
+                            tx.send(CompareProgress::FileDone)?;
+                            index += 1;
+                            cur1 = it1_rx.recv().ok();
+                        }
+                        Ordering::Greater => {
+                            let (rel2, _) = cur2.take().unwrap();
+                            let result =
+                                FileComparisonResult::new(rel2, Classification::OnlyInDir2);
+                            tx.send(CompareProgress::Result(index, result))?;
+                            tx.send(CompareProgress::FileDone)?;
+                            index += 1;
+                            cur2 = it2_rx.recv().ok();
+                        }
+                        Ordering::Equal => {
+                            let (rel_path, path1) = cur1.take().unwrap();
+                            let (_, path2) = cur2.take().unwrap();
+                            let buffer_size = self.buffer_size;
+                            let tx_clone = tx.clone();
+                            let i = index;
+                            let should_compare =
+                                self.comparison_method != FileComparisonMethod::Size;
+                            scope.spawn(move |_| {
+                                let mut comparer = FileComparer::new(&path1, &path2);
+                                comparer.buffer_size = buffer_size;
+                                if let Some((h1, h2)) = hashers_ref {
+                                    comparer.hashers = Some((h1, h2));
+                                }
+                                let mut result = FileComparisonResult::new(
+                                    rel_path.clone(),
+                                    Classification::InBoth,
+                                );
+                                if let Err(error) = result.update(&comparer, should_compare) {
+                                    log::error!(
+                                        "Error during comparison of {:?}: {}",
+                                        rel_path,
+                                        error
+                                    );
+                                }
+                                if tx_clone.send(CompareProgress::Result(i, result)).is_err()
+                                    || tx_clone.send(CompareProgress::FileDone).is_err()
+                                {
+                                    log::error!("Send failed during comparison of {:?}", rel_path);
+                                }
+                            });
+                            index += 1;
+                            cur1 = it1_rx.recv().ok();
+                            cur2 = it2_rx.recv().ok();
+                        }
                     }
                 }
-            }
-            tx.send(CompareProgress::TotalFiles(index))
+                tx.send(CompareProgress::TotalFiles(index))
+            })?;
+            Ok::<(), anyhow::Error>(())
         })?;
+
         Self::save_hashers(hashers)?;
         Ok(())
     }

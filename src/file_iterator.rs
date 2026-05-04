@@ -1,6 +1,7 @@
 use crate::{FileHashCache, FileHasher};
 use globset::GlobSet;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use walkdir::WalkDir;
 
 pub(crate) struct FileIterator<'a> {
@@ -20,6 +21,24 @@ impl<'a> FileIterator<'a> {
             hasher: None,
             exclude: None,
         }
+    }
+
+    pub(crate) fn spawn_in_scope<'scope>(
+        self,
+        scope: &'scope std::thread::Scope<'scope, '_>,
+    ) -> mpsc::Receiver<(PathBuf, PathBuf)>
+    where
+        'a: 'scope,
+    {
+        let (tx, rx) = mpsc::channel();
+        scope.spawn(move || {
+            for item in self {
+                if tx.send(item).is_err() {
+                    break;
+                }
+            }
+        });
+        rx
     }
 }
 
