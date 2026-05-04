@@ -17,6 +17,21 @@ enum HashProgress {
     Result(PathBuf, u64, blake3::Hash, bool),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum CheckStatus {
+    Unchanged,
+    New,
+    Modified,
+}
+
+#[derive(Debug, PartialEq)]
+enum CheckEvent {
+    StartChecking,
+    TotalFiles(usize),
+    Result(PathBuf, CheckStatus),
+    FileDone,
+}
+
 enum EntryState {
     Single(PathBuf, std::time::SystemTime),
     Hashing,
@@ -187,6 +202,135 @@ impl FileHasher {
         Ok(duplicates)
     }
 
+    /// Executes the check/update process.
+    pub fn check(&self, update: bool) -> anyhow::Result<()> {
+        let start_time = std::time::Instant::now();
+        let progress = self
+            .progress
+            .as_ref()
+            .map(|progress| progress.add_spinner())
+            .unwrap_or_else(Progress::none);
+        progress.set_message("Scanning directory...");
+        std::thread::scope(|scope| {
+            let (tx, rx) = mpsc::channel();
+            scope.spawn(|| {
+                if let Err(e) = self.check_internal(tx, update) {
+                    log::error!("Error during check: {}", e);
+                }
+            });
+            while let Ok(event) = rx.recv() {
+                match event {
+                    CheckEvent::StartChecking => {
+                        progress.set_message("Checking files...");
+                    }
+                    CheckEvent::TotalFiles(total) => {
+                        progress.set_length(total as u64);
+                        progress.set_message("");
+                    }
+                    CheckEvent::Result(path, status) => {
+                        progress.inc(1);
+                        progress.suspend(|| {
+                            println!(
+                                "{} {}",
+                                match status {
+                                    CheckStatus::New => '+',
+                                    CheckStatus::Modified => '!',
+                                    CheckStatus::Unchanged => unreachable!(),
+                                },
+                                path.display()
+                            );
+                        });
+                    }
+                    CheckEvent::FileDone => {
+                        progress.inc(1);
+                    }
+                }
+            }
+        });
+        progress.finish();
+        if update {
+            self.save_cache()?;
+        }
+        eprintln!("Finished in {}.", FormattedDuration(start_time.elapsed()));
+        Ok(())
+    }
+
+    fn check_internal(&self, tx: mpsc::Sender<CheckEvent>, update: bool) -> anyhow::Result<()> {
+        std::thread::scope(|global_scope| {
+            let mut it = FileIterator::new(self.dir.clone());
+            it.hasher = Some(self);
+            it.exclude = self.exclude.as_ref();
+            let it_rx = it.spawn_in_scope(global_scope);
+            tx.send(CheckEvent::StartChecking)?;
+            let pool = crate::build_thread_pool(self.jobs)?;
+            pool.scope(move |scope| -> anyhow::Result<()> {
+                let mut total_files = 0;
+                for (rel_path, abs_path) in it_rx {
+                    total_files += 1;
+                    let tx_clone = tx.clone();
+                    let cache_clone = self.cache.clone();
+                    let abs_path_owned = abs_path.clone();
+                    let rel_path_owned = rel_path.clone();
+                    scope.spawn(move |_| {
+                        let status = self.check_file(&abs_path_owned, &cache_clone, update);
+                        let event = match status {
+                            Ok(CheckStatus::New) | Ok(CheckStatus::Modified) => {
+                                CheckEvent::Result(rel_path_owned, status.unwrap())
+                            }
+                            Ok(CheckStatus::Unchanged) => CheckEvent::FileDone,
+                            Err(e) => {
+                                log::warn!("Failed to check file {:?}: {}", rel_path_owned, e);
+                                CheckEvent::FileDone
+                            }
+                        };
+                        if tx_clone.send(event).is_err() {
+                            log::error!("Send failed");
+                        }
+                    });
+                }
+                tx.send(CheckEvent::TotalFiles(total_files))?;
+                Ok(())
+            })
+        })?;
+        Ok(())
+    }
+
+    fn check_file(
+        &self,
+        abs_path: &Path,
+        cache: &FileHashCache,
+        update: bool,
+    ) -> anyhow::Result<CheckStatus> {
+        assert!(abs_path.is_absolute());
+        let computed_hash = self.compute_hash(abs_path)?;
+        let rel_path = crate::strip_prefix(abs_path, self.cache.base_dir())?;
+        let cached_hash = cache.get_path(rel_path);
+        let status = match cached_hash {
+            None => CheckStatus::New,
+            Some(cached) => {
+                if computed_hash != cached {
+                    CheckStatus::Modified
+                } else {
+                    CheckStatus::Unchanged
+                }
+            }
+        };
+        if update {
+            let modified = fs::metadata(abs_path)?.modified()?;
+            match status {
+                CheckStatus::New | CheckStatus::Modified => {
+                    cache.insert(rel_path, modified, computed_hash);
+                }
+                CheckStatus::Unchanged => {
+                    if cache.get_path_time(rel_path, modified).is_none() {
+                        cache.insert(rel_path, modified, computed_hash);
+                    }
+                }
+            }
+        }
+        Ok(status)
+    }
+
     fn find_duplicates_internal(&self, tx: mpsc::Sender<HashProgress>) -> anyhow::Result<()> {
         tx.send(HashProgress::StartDiscovering)?;
         let mut by_size: HashMap<u64, EntryState> = HashMap::new();
@@ -249,7 +393,7 @@ impl FileHasher {
     ) {
         let relative = crate::strip_prefix(path, self.cache.base_dir())
             .expect("path should be in cache base_dir");
-        if let Some(hash) = self.cache.get(relative, modified) {
+        if let Some(hash) = self.cache.get_path_time(relative, modified) {
             self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
             let _ = tx.send(HashProgress::Result(path.to_path_buf(), size, hash, true));
             return;
@@ -276,7 +420,7 @@ impl FileHasher {
         let modified = meta.modified()?;
         let relative = crate::strip_prefix(path, self.cache.base_dir())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        if let Some(hash) = self.cache.get(relative, modified) {
+        if let Some(hash) = self.cache.get_path_time(relative, modified) {
             self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
             return Ok(hash);
         }
@@ -327,6 +471,17 @@ impl FileHasher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn default_exclude() -> globset::GlobSet {
+        let mut builder = globset::GlobSetBuilder::new();
+        builder.add(
+            globset::GlobBuilder::new(".hash_cache")
+                .case_insensitive(true)
+                .build()
+                .unwrap(),
+        );
+        builder.build().unwrap()
+    }
 
     #[test]
     fn find_duplicates() -> anyhow::Result<()> {
@@ -435,6 +590,172 @@ mod tests {
         assert!(group.paths.contains(&file1_path));
         assert!(group.paths.contains(&file2_path));
         assert!(!group.paths.contains(&exclude_path));
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_mode_empty_cache() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let dir_path = dir.path().to_path_buf();
+        println!("{:?}", dir_path);
+        let file1_path = dir.path().join("file1.txt");
+        fs::write(&file1_path, "content 1")?;
+        let file2_path = dir.path().join("file2.txt");
+        fs::write(&file2_path, "content 2")?;
+
+        let mut hasher = FileHasher::new(dir_path.clone());
+        hasher.exclude = Some(default_exclude());
+        let (tx, rx) = mpsc::channel();
+        hasher.check_internal(tx, false)?;
+        let mut results = Vec::new();
+        let mut start_seen = false;
+        let mut total_files = None;
+        let mut file_done_count = 0;
+        while let Ok(event) = rx.recv() {
+            match event {
+                CheckEvent::StartChecking => start_seen = true,
+                CheckEvent::TotalFiles(total) => total_files = Some(total),
+                CheckEvent::Result(path, status) => results.push((path, status)),
+                CheckEvent::FileDone => file_done_count += 1,
+            }
+        }
+        assert!(start_seen);
+        assert_eq!(total_files, Some(2));
+        assert_eq!(file_done_count, 0);
+
+        results.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0], (PathBuf::from("file1.txt"), CheckStatus::New));
+        assert_eq!(results[1], (PathBuf::from("file2.txt"), CheckStatus::New));
+
+        assert!(!dir.path().join(FileHashCache::FILE_NAME).exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_mode_with_cache() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let dir_path = dir.path().to_path_buf();
+        let file1_path = dir.path().join("file1.txt");
+        fs::write(&file1_path, "content 1")?;
+        let file2_path = dir.path().join("file2.txt");
+        fs::write(&file2_path, "content 2")?;
+
+        let mut hasher = FileHasher::new(dir_path.clone());
+        hasher.exclude = Some(default_exclude());
+        let _hash1 = hasher.get_hash(&file1_path)?;
+        let _hash2 = hasher.get_hash(&file2_path)?;
+        hasher.save_cache()?;
+        assert!(dir.path().join(FileHashCache::FILE_NAME).exists());
+
+        let mut hasher = FileHasher::new(dir_path.clone());
+        hasher.exclude = Some(default_exclude());
+        let (tx, rx) = mpsc::channel();
+        hasher.check_internal(tx, false)?;
+        let mut results = Vec::new();
+        let mut file_done_count = 0;
+        while let Ok(event) = rx.recv() {
+            match event {
+                CheckEvent::Result(path, status) => results.push((path, status)),
+                CheckEvent::FileDone => file_done_count += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(results.len(), 0);
+        assert_eq!(file_done_count, 2);
+
+        fs::write(&file1_path, "content 1 modified")?;
+
+        let file2_meta_before = fs::metadata(&file2_path)?;
+        let mtime_before = file2_meta_before.modified()?;
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(&file2_path, "content 2")?;
+        let file2_meta_after = fs::metadata(&file2_path)?;
+        let mtime_after = file2_meta_after.modified()?;
+        assert!(mtime_after > mtime_before);
+
+        let mut hasher = FileHasher::new(dir_path.clone());
+        hasher.exclude = Some(default_exclude());
+        let (tx, rx) = mpsc::channel();
+        hasher.check_internal(tx, false)?;
+        let mut results = Vec::new();
+        let mut file_done_count = 0;
+        while let Ok(event) = rx.recv() {
+            match event {
+                CheckEvent::Result(path, status) => results.push((path, status)),
+                CheckEvent::FileDone => file_done_count += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0],
+            (PathBuf::from("file1.txt"), CheckStatus::Modified)
+        );
+        assert_eq!(file_done_count, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_mode() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let dir_path = dir.path().to_path_buf();
+        let file1_path = dir.path().join("file1.txt");
+        fs::write(&file1_path, "content 1")?;
+
+        let mut hasher = FileHasher::new(dir_path.clone());
+        hasher.exclude = Some(default_exclude());
+        let (tx, rx) = mpsc::channel();
+        hasher.check_internal(tx, true)?;
+        while rx.recv().is_ok() {}
+        hasher.save_cache()?;
+        assert!(dir.path().join(FileHashCache::FILE_NAME).exists());
+
+        let cache = FileHashCache::new(&dir_path);
+        let mtime1 = fs::metadata(&file1_path)?.modified()?;
+        let hash1 = cache.get_path_time(&PathBuf::from("file1.txt"), mtime1);
+        assert!(hash1.is_some());
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(&file1_path, "content 1 modified")?;
+        let mtime1_mod = fs::metadata(&file1_path)?.modified()?;
+
+        let mut hasher = FileHasher::new(dir_path.clone());
+        hasher.exclude = Some(default_exclude());
+        let (tx, rx) = mpsc::channel();
+        hasher.check_internal(tx, true)?;
+        while rx.recv().is_ok() {}
+        hasher.save_cache()?;
+
+        let cache = FileHashCache::new(&dir_path);
+        let hash_mod = cache.get_path_time(&PathBuf::from("file1.txt"), mtime1_mod);
+        assert!(hash_mod.is_some());
+        assert_ne!(hash1, hash_mod);
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(&file1_path, "content 1 modified")?;
+        let mtime1_mod2 = fs::metadata(&file1_path)?.modified()?;
+        assert!(mtime1_mod2 > mtime1_mod);
+
+        assert!(
+            cache
+                .get_path_time(&PathBuf::from("file1.txt"), mtime1_mod2)
+                .is_none()
+        );
+
+        let mut hasher = FileHasher::new(dir_path.clone());
+        hasher.exclude = Some(default_exclude());
+        let (tx, rx) = mpsc::channel();
+        hasher.check_internal(tx, true)?;
+        while rx.recv().is_ok() {}
+        hasher.save_cache()?;
+
+        let cache = FileHashCache::new(&dir_path);
+        assert!(
+            cache
+                .get_path_time(&PathBuf::from("file1.txt"), mtime1_mod2)
+                .is_some()
+        );
         Ok(())
     }
 }

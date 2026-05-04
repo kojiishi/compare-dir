@@ -12,7 +12,7 @@
 # compare-dir
 
 A command line tool to compare two directories and show the differences.
-It can also find duplicated files within a single directory.
+It can also find changed, corrupted, and duplicated files.
 
 ## Installation
 
@@ -27,6 +27,7 @@ See [Releases] for the change history.
 `compare-dir` supports the following features:
 
 * [Compare Directories]
+* [Find Changed or Corrupted Files][find changed files]
 * [Find Duplicates]
 
 ### Compare Directories
@@ -111,6 +112,41 @@ To do this in PowerShell:
 ```powershell
 compare-dir -s <dir1> <dir2> | sls '^..!' | %{$_ -replace '^....',''}
 ```
+
+### Find Changed or Corrupted Files
+[find changed files]: #find-changed-or-corrupted-files
+
+`compare-dir` can find changed files
+by comparing hashes with the previously saved hashes in the [hash cache].
+This is useful when there could be possible corruptions,
+such as after unexpected power down or RAID rebuild.
+
+First, the [hash cache] needs to be created.
+[Comparing directories][compare directories] creates it.
+Another way is to use the `-c update` option.
+
+```shell-session
+compare-dir -c update <dir>
+```
+
+Then the `-c check` option can find changed files.
+
+```shell-session
+compare-dir -c check <dir>
+```
+
+It prints a symbol, followed by the path.
+| Symbol | Meaning |
+| --- | --- |
+| `+` | The file isn't in the [hash cache]. |
+| `!` | The file is changed. |
+
+The `-c check` option doesn't update the [hash cache],
+so that you can run it multiple times.
+If you want to update the [hash cache],
+please use `-c update` instead.
+This option prints the same output as `-c check`,
+but also updates the [hash cache].
 
 ### Find Duplicates
 [find duplicates]: #find-duplicates

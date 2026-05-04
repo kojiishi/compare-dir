@@ -16,6 +16,8 @@ enum CompareMethod {
     Hash,
     Rehash,
     Full,
+    Check,
+    Update,
 }
 
 #[derive(Parser, Debug)]
@@ -65,6 +67,9 @@ fn main() -> anyhow::Result<()> {
     // walking ancestors.
     ensure_absolute_path(&mut args.dir1)?;
     if let Some(mut dir2) = args.dir2 {
+        if args.compare == CompareMethod::Check || args.compare == CompareMethod::Update {
+            anyhow::bail!("Check/Update modes only support one directory.");
+        }
         ensure_absolute_path(&mut dir2)?;
         let mut comparer = DirectoryComparer::new(args.dir1, dir2);
         comparer.is_symbols_format = args.symbol;
@@ -74,6 +79,7 @@ fn main() -> anyhow::Result<()> {
             CompareMethod::Hash => FileComparisonMethod::Hash,
             CompareMethod::Rehash => FileComparisonMethod::Rehash,
             CompareMethod::Full => FileComparisonMethod::Full,
+            CompareMethod::Check | CompareMethod::Update => unreachable!(),
         };
         comparer.exclude = build_exclude(&args.exclude)?;
         comparer.jobs = args.jobs;
@@ -82,13 +88,18 @@ fn main() -> anyhow::Result<()> {
     } else {
         let mut hasher = FileHasher::new(args.dir1);
         hasher.buffer_size = args.buffer * 1024;
-        if args.compare == CompareMethod::Rehash {
-            hasher.clear_cache()?;
-        }
         hasher.exclude = build_exclude(&args.exclude)?;
         hasher.jobs = args.jobs;
         hasher.progress = Some(Arc::new(progress));
-        hasher.run()
+        match args.compare {
+            CompareMethod::Check => hasher.check(false),
+            CompareMethod::Update => hasher.check(true),
+            CompareMethod::Rehash => {
+                hasher.clear_cache()?;
+                hasher.run()
+            }
+            _ => hasher.run(),
+        }
     }
 }
 
