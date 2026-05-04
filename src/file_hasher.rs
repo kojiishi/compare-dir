@@ -191,43 +191,47 @@ impl FileHasher {
         tx.send(HashProgress::StartDiscovering)?;
         let mut by_size: HashMap<u64, EntryState> = HashMap::new();
         let mut total_hashed = 0;
-        let pool = crate::build_thread_pool(self.jobs)?;
-        pool.scope(|scope| -> anyhow::Result<()> {
+        std::thread::scope(|global_scope| {
             let mut it = FileIterator::new(self.dir.clone());
             it.hasher = Some(self);
             it.exclude = self.exclude.as_ref();
-            for (_, current_path) in it {
-                let meta = fs::metadata(&current_path)?;
-                let size = meta.len();
-                let modified = meta.modified()?;
+            let it_rx = it.spawn_in_scope(global_scope);
+            let pool = crate::build_thread_pool(self.jobs)?;
+            pool.scope(move |scope| -> anyhow::Result<()> {
+                for (_, current_path) in it_rx {
+                    let meta = fs::metadata(&current_path)?;
+                    let size = meta.len();
+                    let modified = meta.modified()?;
 
-                // Small optimization: If file size is 0, it's not really worth treating
-                // as wasted space duplicates in the same way, but keeping it unified for now.
-                match by_size.entry(size) {
-                    std::collections::hash_map::Entry::Occupied(mut occ) => match occ.get_mut() {
-                        EntryState::Single(first_path, first_modified) => {
-                            // We found a second file of identical size.
-                            // Time to start hashing both the *original* matching file and the *new* one!
-                            self.spawn_hash_task(scope, first_path, size, *first_modified, &tx);
-                            self.spawn_hash_task(scope, &current_path, size, modified, &tx);
+                    // Small optimization: If file size is 0, it's not really worth treating
+                    // as wasted space duplicates in the same way, but keeping it unified for now.
+                    match by_size.entry(size) {
+                        std::collections::hash_map::Entry::Occupied(mut occ) => match occ.get_mut()
+                        {
+                            EntryState::Single(first_path, first_modified) => {
+                                // We found a second file of identical size.
+                                // Time to start hashing both the *original* matching file and the *new* one!
+                                self.spawn_hash_task(scope, first_path, size, *first_modified, &tx);
+                                self.spawn_hash_task(scope, &current_path, size, modified, &tx);
 
-                            // Modify the state to indicate we are now fully hashing this size bucket.
-                            *occ.get_mut() = EntryState::Hashing;
-                            total_hashed += 2;
+                                // Modify the state to indicate we are now fully hashing this size bucket.
+                                *occ.get_mut() = EntryState::Hashing;
+                                total_hashed += 2;
+                            }
+                            EntryState::Hashing => {
+                                // File size bucket already hashing; just dynamically spawn the new file immediately.
+                                self.spawn_hash_task(scope, &current_path, size, modified, &tx);
+                                total_hashed += 1;
+                            }
+                        },
+                        std::collections::hash_map::Entry::Vacant(vac) => {
+                            vac.insert(EntryState::Single(current_path, modified));
                         }
-                        EntryState::Hashing => {
-                            // File size bucket already hashing; just dynamically spawn the new file immediately.
-                            self.spawn_hash_task(scope, &current_path, size, modified, &tx);
-                            total_hashed += 1;
-                        }
-                    },
-                    std::collections::hash_map::Entry::Vacant(vac) => {
-                        vac.insert(EntryState::Single(current_path, modified));
                     }
                 }
-            }
-            tx.send(HashProgress::TotalFiles(total_hashed))?;
-            Ok(())
+                tx.send(HashProgress::TotalFiles(total_hashed))?;
+                Ok(())
+            })
         })?;
 
         // The scope waits for all spawned tasks to complete.
