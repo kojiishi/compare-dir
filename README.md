@@ -122,12 +122,13 @@ This is useful when there could be possible corruptions,
 such as after unexpected power down or RAID rebuild.
 
 First, the [hash cache] needs to be created.
-[Comparing directories][compare directories] creates it.
-Another way is to use the `-c update` option.
-
-```shell-session
-compare-dir -c update <dir>
-```
+There are two ways to do this.
+* [Comparing directories][compare directories] creates it automatically,
+  when it runs with the `-c hash` option (default).
+* Use the `-c update` option.
+  ```shell-session
+  compare-dir -c update <dir>
+  ```
 
 Then the `-c check` option can find changed files.
 
@@ -177,7 +178,7 @@ depending on the `--compare` option.
 | `--compare` | Hash cache usage |
 | --- | --- |
 | full, size | Not used. |
-| hash, dup | Used if modified time doesn't change. Updated otherwise. |
+| hash, dup | Used if modified time doesn't change, updated otherwise. |
 | rehash | Updated. |
 | check | Used. |
 | update | Used and updated. |
