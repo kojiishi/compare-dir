@@ -104,104 +104,6 @@ impl FileHasher {
         Ok(())
     }
 
-    /// Executes the duplicate file finding process and prints results.
-    pub fn run(&self) -> anyhow::Result<()> {
-        let start_time = std::time::Instant::now();
-        let mut duplicates = self.find_duplicates()?;
-        if duplicates.is_empty() {
-            println!("No duplicates found.");
-        } else {
-            duplicates.sort_by_key(|a| a.size);
-            let mut total_wasted_space = 0;
-            for dupes in &duplicates {
-                let paths = &dupes.paths;
-                let file_size = dupes.size;
-                println!(
-                    "Identical {} files of {}:",
-                    paths.len(),
-                    crate::human_readable_size(file_size)
-                );
-                for path in paths {
-                    println!("  {}", path.display());
-                }
-                total_wasted_space += file_size * (paths.len() as u64 - 1);
-            }
-            eprintln!(
-                "Total wasted space: {}",
-                crate::human_readable_size(total_wasted_space)
-            );
-        }
-        eprintln!("Finished in {}.", FormattedDuration(start_time.elapsed()));
-        Ok(())
-    }
-
-    /// Finds duplicated files and returns a list of duplicate groups.
-    pub fn find_duplicates(&self) -> anyhow::Result<Vec<DuplicatedFiles>> {
-        let progress = self
-            .progress
-            .as_ref()
-            .map(|progress| progress.add_spinner())
-            .unwrap_or_else(Progress::none);
-        progress.set_message("Scanning directories...");
-
-        let (tx, rx) = mpsc::channel();
-        let mut by_hash: HashMap<blake3::Hash, DuplicatedFiles> = HashMap::new();
-        let mut num_cache_hits = 0;
-        std::thread::scope(|scope| {
-            scope.spawn(|| {
-                if let Err(e) = self.find_duplicates_internal(tx) {
-                    log::error!("Error during duplicate finding: {}", e);
-                }
-            });
-
-            while let Ok(event) = rx.recv() {
-                match event {
-                    HashProgress::StartDiscovering => {
-                        progress.set_message("Hashing files...");
-                    }
-                    HashProgress::TotalFiles(total) => {
-                        progress.set_length(total as u64);
-                        if num_cache_hits > 0 {
-                            progress.set_message(format!(" ({} cache hits)", num_cache_hits));
-                        }
-                    }
-                    HashProgress::Result(path, size, hash, is_cache_hit) => {
-                        if is_cache_hit {
-                            num_cache_hits += 1;
-                            if progress.length().is_none() {
-                                progress.set_message(format!(
-                                    "Hashing files... ({} cache hits)",
-                                    num_cache_hits
-                                ));
-                            } else {
-                                progress.set_message(format!(" ({} cache hits)", num_cache_hits));
-                            }
-                        }
-
-                        progress.inc(1);
-                        let entry = by_hash.entry(hash).or_insert_with(|| DuplicatedFiles {
-                            paths: Vec::new(),
-                            size,
-                        });
-                        // Hash collisions shouldn't happen, but if they do, sizes shouldn't mismatch.
-                        assert_eq!(entry.size, size, "Hash collision: sizes do not match");
-                        entry.paths.push(path);
-                    }
-                }
-            }
-        });
-        progress.finish();
-
-        let mut duplicates = Vec::new();
-        for (_, mut dupes) in by_hash {
-            if dupes.paths.len() > 1 {
-                dupes.paths.sort();
-                duplicates.push(dupes);
-            }
-        }
-        Ok(duplicates)
-    }
-
     /// Executes the check/update process.
     pub fn check(&self, update: bool) -> anyhow::Result<()> {
         let start_time = std::time::Instant::now();
@@ -323,6 +225,104 @@ impl FileHasher {
             }
         }
         Ok(status)
+    }
+
+    /// Executes the duplicate file finding process and prints results.
+    pub fn run(&self) -> anyhow::Result<()> {
+        let start_time = std::time::Instant::now();
+        let mut duplicates = self.find_duplicates()?;
+        if duplicates.is_empty() {
+            println!("No duplicates found.");
+        } else {
+            duplicates.sort_by_key(|a| a.size);
+            let mut total_wasted_space = 0;
+            for dupes in &duplicates {
+                let paths = &dupes.paths;
+                let file_size = dupes.size;
+                println!(
+                    "Identical {} files of {}:",
+                    paths.len(),
+                    crate::human_readable_size(file_size)
+                );
+                for path in paths {
+                    println!("  {}", path.display());
+                }
+                total_wasted_space += file_size * (paths.len() as u64 - 1);
+            }
+            eprintln!(
+                "Total wasted space: {}",
+                crate::human_readable_size(total_wasted_space)
+            );
+        }
+        eprintln!("Finished in {}.", FormattedDuration(start_time.elapsed()));
+        Ok(())
+    }
+
+    /// Finds duplicated files and returns a list of duplicate groups.
+    pub fn find_duplicates(&self) -> anyhow::Result<Vec<DuplicatedFiles>> {
+        let progress = self
+            .progress
+            .as_ref()
+            .map(|progress| progress.add_spinner())
+            .unwrap_or_else(Progress::none);
+        progress.set_message("Scanning directories...");
+
+        let (tx, rx) = mpsc::channel();
+        let mut by_hash: HashMap<blake3::Hash, DuplicatedFiles> = HashMap::new();
+        let mut num_cache_hits = 0;
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                if let Err(e) = self.find_duplicates_internal(tx) {
+                    log::error!("Error during duplicate finding: {}", e);
+                }
+            });
+
+            while let Ok(event) = rx.recv() {
+                match event {
+                    HashProgress::StartDiscovering => {
+                        progress.set_message("Hashing files...");
+                    }
+                    HashProgress::TotalFiles(total) => {
+                        progress.set_length(total as u64);
+                        if num_cache_hits > 0 {
+                            progress.set_message(format!(" ({} cache hits)", num_cache_hits));
+                        }
+                    }
+                    HashProgress::Result(path, size, hash, is_cache_hit) => {
+                        if is_cache_hit {
+                            num_cache_hits += 1;
+                            if progress.length().is_none() {
+                                progress.set_message(format!(
+                                    "Hashing files... ({} cache hits)",
+                                    num_cache_hits
+                                ));
+                            } else {
+                                progress.set_message(format!(" ({} cache hits)", num_cache_hits));
+                            }
+                        }
+
+                        progress.inc(1);
+                        let entry = by_hash.entry(hash).or_insert_with(|| DuplicatedFiles {
+                            paths: Vec::new(),
+                            size,
+                        });
+                        // Hash collisions shouldn't happen, but if they do, sizes shouldn't mismatch.
+                        assert_eq!(entry.size, size, "Hash collision: sizes do not match");
+                        entry.paths.push(path);
+                    }
+                }
+            }
+        });
+        progress.finish();
+
+        let mut duplicates = Vec::new();
+        for (_, mut dupes) in by_hash {
+            if dupes.paths.len() > 1 {
+                dupes.paths.sort();
+                duplicates.push(dupes);
+            }
+        }
+        Ok(duplicates)
     }
 
     fn find_duplicates_internal(&self, tx: mpsc::Sender<HashProgress>) -> anyhow::Result<()> {
