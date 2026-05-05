@@ -60,7 +60,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sort_stream_ordered() -> anyhow::Result<()> {
+    fn sort_stream_ordered() -> anyhow::Result<()> {
         let (tx, rx) = mpsc::channel();
         sort_stream(
             tx,
@@ -95,7 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sort_stream_producer_stops_early() -> anyhow::Result<()> {
+    fn sort_stream_producer_stops_early() -> anyhow::Result<()> {
         let (tx, rx) = mpsc::channel();
         sort_stream(
             tx,
