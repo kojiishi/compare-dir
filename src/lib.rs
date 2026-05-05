@@ -4,6 +4,7 @@ mod file_hash_cache;
 mod file_hasher;
 mod file_iterator;
 mod progress;
+mod sort_stream;
 
 pub use dir_comparer::{DirectoryComparer, FileComparisonMethod};
 pub use file_comparer::{Classification, FileComparer, FileComparisonResult};
@@ -12,6 +13,7 @@ pub use file_hasher::{DuplicatedFiles, FileHasher};
 pub(crate) use file_iterator::FileIterator;
 pub(crate) use progress::Progress;
 pub use progress::ProgressBuilder;
+pub(crate) use sort_stream::sort_stream;
 
 use std::path::{Path, StripPrefixError};
 

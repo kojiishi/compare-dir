@@ -5,7 +5,6 @@ use crate::{
 use globset::GlobSet;
 use indicatif::FormattedDuration;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 
@@ -133,36 +132,14 @@ impl DirectoryComparer {
     /// # Arguments
     /// * `tx` - A sender to transmit `FileComparisonResult` as they are computed.
     fn compare_streaming_ordered(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
-        let (tx_unordered, rx_unordered) = mpsc::channel();
-        std::thread::scope(|scope| {
-            scope.spawn(move || {
-                if let Err(e) = self.compare_streaming_unordered(tx_unordered) {
-                    log::error!("Error during unordered comparison: {}", e);
-                }
-            });
-
-            let mut buffer = HashMap::new();
-            let mut next_index = 0;
-            for event in rx_unordered {
-                if let CompareProgress::Result(i, _) = &event {
-                    let index = *i;
-                    if index == next_index {
-                        tx.send(event)?;
-                        next_index += 1;
-                        while let Some(buffered) = buffer.remove(&next_index) {
-                            tx.send(buffered)?;
-                            next_index += 1;
-                        }
-                    } else {
-                        buffer.insert(index, event);
-                    }
-                } else {
-                    tx.send(event)?;
-                }
-            }
-            Ok::<(), anyhow::Error>(())
-        })?;
-        Ok(())
+        crate::sort_stream(
+            |tx_unordered| self.compare_streaming_unordered(tx_unordered),
+            tx,
+            |event| match event {
+                CompareProgress::Result(i, _) => Some(*i),
+                _ => None,
+            },
+        )
     }
 
     fn compare_streaming_unordered(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
