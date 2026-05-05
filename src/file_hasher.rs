@@ -268,11 +268,10 @@ impl FileHasher {
                 for (rel_path, abs_path) in it_rx {
                     total_files += 1;
                     let tx_clone = tx.clone();
-                    let cache_clone = self.cache.clone();
                     let abs_path_owned = abs_path.clone();
                     let rel_path_owned = rel_path.clone();
                     scope.spawn(move |_| {
-                        let status = self.check_file(&abs_path_owned, &cache_clone, update);
+                        let status = self.check_file(&abs_path_owned, update);
                         let event = match status {
                             Ok(CheckStatus::New) | Ok(CheckStatus::Modified) => {
                                 CheckEvent::Result(rel_path_owned, status.unwrap())
@@ -295,16 +294,11 @@ impl FileHasher {
         Ok(())
     }
 
-    fn check_file(
-        &self,
-        abs_path: &Path,
-        cache: &FileHashCache,
-        update: bool,
-    ) -> anyhow::Result<CheckStatus> {
+    fn check_file(&self, abs_path: &Path, update: bool) -> anyhow::Result<CheckStatus> {
         assert!(abs_path.is_absolute());
         let computed_hash = self.compute_hash(abs_path)?;
         let rel_path = crate::strip_prefix(abs_path, self.cache.base_dir())?;
-        let cached_hash = cache.get_path(rel_path);
+        let cached_hash = self.cache.get_path(rel_path);
         let status = match cached_hash {
             None => CheckStatus::New,
             Some(cached) => {
@@ -319,11 +313,11 @@ impl FileHasher {
             let modified = fs::metadata(abs_path)?.modified()?;
             match status {
                 CheckStatus::New | CheckStatus::Modified => {
-                    cache.insert(rel_path, modified, computed_hash);
+                    self.cache.insert(rel_path, modified, computed_hash);
                 }
                 CheckStatus::Unchanged => {
-                    if cache.get_path_time(rel_path, modified).is_none() {
-                        cache.insert(rel_path, modified, computed_hash);
+                    if self.cache.get_path_time(rel_path, modified).is_none() {
+                        self.cache.insert(rel_path, modified, computed_hash);
                     }
                 }
             }
@@ -402,11 +396,10 @@ impl FileHasher {
         let path_owned = path.to_path_buf();
         let relative_owned = relative.to_path_buf();
         let tx_owned = tx.clone();
-        let cache_owned = self.cache.clone();
         scope.spawn(move |_| {
             if let Ok(hash) = self.compute_hash(&path_owned) {
                 self.num_hashed.fetch_add(1, Ordering::Relaxed);
-                cache_owned.insert(&relative_owned, modified, hash);
+                self.cache.insert(&relative_owned, modified, hash);
                 let _ = tx_owned.send(HashProgress::Result(path_owned, size, hash, false));
             } else {
                 log::warn!("Failed to hash file: {:?}", path_owned);
