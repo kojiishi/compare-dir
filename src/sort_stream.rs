@@ -115,10 +115,7 @@ mod tests {
         }
         assert_eq!(
             final_results,
-            vec![
-                TestEvent::Start,
-                TestEvent::Result(0, "zero".to_string()),
-            ]
+            vec![TestEvent::Start, TestEvent::Result(0, "zero".to_string()),]
         );
         Ok(())
     }
