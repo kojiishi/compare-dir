@@ -10,8 +10,8 @@ use std::sync::mpsc;
 ///
 /// Events where `get_index` returns `None` are forwarded immediately.
 pub(crate) fn sort_stream<'scope, T>(
-    producer: impl FnOnce(mpsc::Sender<T>) -> anyhow::Result<()> + Send + 'scope,
     tx: mpsc::Sender<T>,
+    producer: impl FnOnce(mpsc::Sender<T>) -> anyhow::Result<()> + Send + 'scope,
     get_index: impl Fn(&T) -> Option<usize> + Send + 'scope,
 ) -> anyhow::Result<()>
 where
@@ -63,6 +63,7 @@ mod tests {
     fn test_sort_stream_ordered() -> anyhow::Result<()> {
         let (tx, rx) = mpsc::channel();
         sort_stream(
+            tx,
             |tx| {
                 tx.send(TestEvent::Start)?;
                 tx.send(TestEvent::Result(1, "one".to_string()))?;
@@ -71,7 +72,6 @@ mod tests {
                 tx.send(TestEvent::End)?;
                 Ok(())
             },
-            tx,
             |event| match event {
                 TestEvent::Result(i, _) => Some(*i),
                 _ => None,
@@ -98,12 +98,12 @@ mod tests {
     fn test_sort_stream_producer_stops_early() -> anyhow::Result<()> {
         let (tx, rx) = mpsc::channel();
         sort_stream(
+            tx,
             |tx| {
                 tx.send(TestEvent::Start)?;
                 tx.send(TestEvent::Result(0, "zero".to_string()))?;
                 anyhow::bail!("Producer error!");
             },
-            tx,
             |event| match event {
                 TestEvent::Result(i, _) => Some(*i),
                 _ => None,

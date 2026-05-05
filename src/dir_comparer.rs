@@ -133,8 +133,8 @@ impl DirectoryComparer {
     /// * `tx` - A sender to transmit `FileComparisonResult` as they are computed.
     fn compare_streaming_ordered(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
         crate::sort_stream(
-            |tx_unordered| self.compare_streaming_unordered(tx_unordered),
             tx,
+            |tx_unordered| self.compare_streaming(tx_unordered),
             |event| match event {
                 CompareProgress::Result(i, _) => Some(*i),
                 _ => None,
@@ -142,7 +142,7 @@ impl DirectoryComparer {
         )
     }
 
-    fn compare_streaming_unordered(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
+    fn compare_streaming(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
         let mut it1 = FileIterator::new(self.dir1.clone());
         let mut it2 = FileIterator::new(self.dir2.clone());
         it1.exclude = self.exclude.as_ref();

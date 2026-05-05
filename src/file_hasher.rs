@@ -116,7 +116,7 @@ impl FileHasher {
         std::thread::scope(|scope| {
             let (tx, rx) = mpsc::channel();
             scope.spawn(|| {
-                if let Err(e) = self.check_internal(tx, update) {
+                if let Err(e) = self.check_streaming(tx, update) {
                     log::error!("Error during check: {}", e);
                 }
             });
@@ -157,7 +157,7 @@ impl FileHasher {
         Ok(())
     }
 
-    fn check_internal(&self, tx: mpsc::Sender<CheckEvent>, update: bool) -> anyhow::Result<()> {
+    fn check_streaming(&self, tx: mpsc::Sender<CheckEvent>, update: bool) -> anyhow::Result<()> {
         std::thread::scope(|global_scope| {
             let mut it = FileIterator::new(self.dir.clone());
             it.hasher = Some(self);
@@ -272,7 +272,7 @@ impl FileHasher {
         let mut num_cache_hits = 0;
         std::thread::scope(|scope| {
             scope.spawn(|| {
-                if let Err(e) = self.find_duplicates_internal(tx) {
+                if let Err(e) = self.find_duplicates_streaming(tx) {
                     log::error!("Error during duplicate finding: {}", e);
                 }
             });
@@ -325,7 +325,7 @@ impl FileHasher {
         Ok(duplicates)
     }
 
-    fn find_duplicates_internal(&self, tx: mpsc::Sender<HashProgress>) -> anyhow::Result<()> {
+    fn find_duplicates_streaming(&self, tx: mpsc::Sender<HashProgress>) -> anyhow::Result<()> {
         tx.send(HashProgress::StartDiscovering)?;
         let mut by_size: HashMap<u64, EntryState> = HashMap::new();
         let mut total_hashed = 0;
@@ -599,7 +599,7 @@ mod tests {
         let mut hasher = FileHasher::new(dir_path.clone());
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_internal(tx, false)?;
+        hasher.check_streaming(tx, false)?;
         let mut results = Vec::new();
         let mut start_seen = false;
         let mut total_files = None;
@@ -644,7 +644,7 @@ mod tests {
         let mut hasher = FileHasher::new(dir_path.clone());
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_internal(tx, false)?;
+        hasher.check_streaming(tx, false)?;
         let mut results = Vec::new();
         let mut file_done_count = 0;
         while let Ok(event) = rx.recv() {
@@ -670,7 +670,7 @@ mod tests {
         let mut hasher = FileHasher::new(dir_path.clone());
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_internal(tx, false)?;
+        hasher.check_streaming(tx, false)?;
         let mut results = Vec::new();
         let mut file_done_count = 0;
         while let Ok(event) = rx.recv() {
@@ -699,7 +699,7 @@ mod tests {
         let mut hasher = FileHasher::new(dir_path.clone());
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_internal(tx, true)?;
+        hasher.check_streaming(tx, true)?;
         while rx.recv().is_ok() {}
         hasher.save_cache()?;
         assert!(dir.path().join(FileHashCache::FILE_NAME).exists());
@@ -716,7 +716,7 @@ mod tests {
         let mut hasher = FileHasher::new(dir_path.clone());
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_internal(tx, true)?;
+        hasher.check_streaming(tx, true)?;
         while rx.recv().is_ok() {}
         hasher.save_cache()?;
 
@@ -739,7 +739,7 @@ mod tests {
         let mut hasher = FileHasher::new(dir_path.clone());
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_internal(tx, true)?;
+        hasher.check_streaming(tx, true)?;
         while rx.recv().is_ok() {}
         hasher.save_cache()?;
 
