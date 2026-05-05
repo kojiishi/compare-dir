@@ -95,17 +95,19 @@ mod tests {
         let file_path = dir_path.join("real_file.txt");
         fs::write(&file_path, "content")?;
 
-        let symlink_path = dir_path.join("symlink.txt");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&file_path, &symlink_path)?;
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_file(&file_path, &symlink_path)?;
-
         // Create a target directory OUTSIDE the scanned directory
         let outside_dir = tempdir()?;
         let target_dir = outside_dir.path().join("target_dir");
         fs::create_dir(&target_dir)?;
-        fs::write(target_dir.join("file_in_dir.txt"), "content")?;
+        let target_path = target_dir.join("file_in_dir.txt");
+        fs::write(&target_path, "content")?;
+
+        // Create a file symlink and a directory symlink to `target_dir`.
+        let symlink_path = dir_path.join("symlink.txt");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target_path, &symlink_path)?;
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&target_path, &symlink_path)?;
 
         let dir_symlink_path = dir_path.join("dir_symlink");
         #[cfg(unix)]
@@ -113,10 +115,9 @@ mod tests {
         #[cfg(windows)]
         std::os::windows::fs::symlink_dir(&target_dir, &dir_symlink_path)?;
 
+        // Should only contain the real file, not the symlinks (file or directory)
         let it = FileIterator::new(dir_path.to_path_buf());
         let files: Vec<_> = it.collect();
-
-        // Should only contain the real file, not the symlinks (file or directory)
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].0, PathBuf::from("real_file.txt"));
         assert_eq!(files[0].1, file_path);
@@ -134,10 +135,9 @@ mod tests {
         fs::write(&file2_path, "content2")?;
 
         // Initialize with path to file1.txt directly
+        // Should only contain file1.txt, and its relative path should be empty
         let it = FileIterator::new(file1_path.clone());
         let files: Vec<_> = it.collect();
-
-        // Should only contain file1.txt, and its relative path should be empty
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].0, PathBuf::from(""));
         assert_eq!(files[0].1, file1_path);
