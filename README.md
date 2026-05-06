@@ -16,6 +16,13 @@ It can also find changed, corrupted, and duplicated files.
 
 ## Installation
 
+**Prerequisites:** [Install Rust] if it's not installed yet.
+
+[install Rust]: https://rustup.rs/
+
+Then the following command installs `compare-dir`
+from [crates.io][crate]:
+
 ```shell-session
 cargo install compare-dir
 ```
