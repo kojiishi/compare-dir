@@ -54,22 +54,22 @@ mod tests {
 
     #[derive(Debug, PartialEq, Clone)]
     enum TestEvent {
-        Start,
         Result(usize, String),
-        End,
+        Immediate(usize),
+        Error,
     }
 
-    #[test]
-    fn sort_stream_ordered() -> anyhow::Result<()> {
+    fn sort_by_sort_stream(source: Vec<TestEvent>) -> anyhow::Result<Vec<TestEvent>> {
         let (tx, rx) = mpsc::channel();
         sort_stream(
             tx,
             |tx| {
-                tx.send(TestEvent::Start)?;
-                tx.send(TestEvent::Result(1, "one".to_string()))?;
-                tx.send(TestEvent::Result(0, "zero".to_string()))?;
-                tx.send(TestEvent::Result(2, "two".to_string()))?;
-                tx.send(TestEvent::End)?;
+                for event in source {
+                    match event {
+                        TestEvent::Error => anyhow::bail!("Producer error!"),
+                        _ => tx.send(event)?,
+                    }
+                }
                 Ok(())
             },
             |event| match event {
@@ -81,14 +81,29 @@ mod tests {
         while let Ok(event) = rx.recv() {
             final_results.push(event);
         }
+        Ok(final_results)
+    }
+
+    #[test]
+    fn sort_stream_ordered() -> anyhow::Result<()> {
         assert_eq!(
-            final_results,
+            sort_by_sort_stream(vec![
+                TestEvent::Immediate(0),
+                TestEvent::Result(1, "one".to_string()),
+                TestEvent::Immediate(1),
+                TestEvent::Result(0, "zero".to_string()),
+                TestEvent::Immediate(2),
+                TestEvent::Result(2, "two".to_string()),
+                TestEvent::Immediate(3),
+            ])?,
             vec![
-                TestEvent::Start,
+                TestEvent::Immediate(0),
+                TestEvent::Immediate(1),
                 TestEvent::Result(0, "zero".to_string()),
                 TestEvent::Result(1, "one".to_string()),
+                TestEvent::Immediate(2),
                 TestEvent::Result(2, "two".to_string()),
-                TestEvent::End,
+                TestEvent::Immediate(3),
             ]
         );
         Ok(())
@@ -96,26 +111,16 @@ mod tests {
 
     #[test]
     fn sort_stream_producer_stops_early() -> anyhow::Result<()> {
-        let (tx, rx) = mpsc::channel();
-        sort_stream(
-            tx,
-            |tx| {
-                tx.send(TestEvent::Start)?;
-                tx.send(TestEvent::Result(0, "zero".to_string()))?;
-                anyhow::bail!("Producer error!");
-            },
-            |event| match event {
-                TestEvent::Result(i, _) => Some(*i),
-                _ => None,
-            },
-        )?;
-        let mut final_results = Vec::new();
-        while let Ok(event) = rx.recv() {
-            final_results.push(event);
-        }
         assert_eq!(
-            final_results,
-            vec![TestEvent::Start, TestEvent::Result(0, "zero".to_string()),]
+            sort_by_sort_stream(vec![
+                TestEvent::Immediate(0),
+                TestEvent::Result(0, "zero".to_string()),
+                TestEvent::Error,
+            ])?,
+            vec![
+                TestEvent::Immediate(0),
+                TestEvent::Result(0, "zero".to_string()),
+            ]
         );
         Ok(())
     }
