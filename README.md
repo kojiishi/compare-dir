@@ -222,8 +222,8 @@ dir1/dir2/file: Contents differ
 > retaining hash caches for other files in the directory
 > and its sub directories.
 
-### Backup
-[backup]: #backup
+### Backup Strategy
+[backup]: #backup-strategy
 
 When backing up, there are two strategies you can take.
 
@@ -231,9 +231,14 @@ When backing up, there are two strategies you can take.
 
 1. Exclude `.hash_cache` when backing up.
 2. Use `compare-dir <dir1> <dir2>` to verify.
-3. Once directories are compared,
-   you can use `compare-dir -c check <backup-dir>`
-   to verify the backup data isn't changed or corrupted.
+3. Once the comparison is completed,
+   the [hash cache] files are updated for both directories.
+   You can use `compare-dir -c check <backup-dir>`
+   to verify the backup data isn't changed or corrupted
+   since the last comparison.
+
+This method is suitable for incremental backups,
+as the step 2 computes hashes only for updated files.
 
 #### Include `.hash_cache`
 
