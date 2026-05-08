@@ -231,8 +231,8 @@ When backing up, there are two strategies you can take.
 
 1. Exclude `.hash_cache` when backing up.
 2. Use `compare-dir <dir1> <dir2>` to verify.
-3. Once the comparison is completed,
-   the [hash cache] files are updated for both directories.
+3. Once the comparison is complete,
+   the hash caches are updated for both directories.
    You can use `compare-dir -c check <backup-dir>`
    to verify the backup data isn't changed or corrupted
    since the last comparison.
