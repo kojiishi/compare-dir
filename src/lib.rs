@@ -5,6 +5,7 @@ mod file_hasher;
 mod file_iterator;
 mod progress;
 mod sort_stream;
+mod system_time_ext;
 
 pub use dir_comparer::{DirectoryComparer, FileComparisonMethod};
 pub use file_comparer::{Classification, FileComparer, FileComparisonResult};
@@ -14,6 +15,7 @@ pub(crate) use file_iterator::FileIterator;
 pub(crate) use progress::Progress;
 pub use progress::ProgressBuilder;
 pub(crate) use sort_stream::sort_stream;
+pub(crate) use system_time_ext::SystemTimeExt;
 
 use std::path::{Path, StripPrefixError};
 

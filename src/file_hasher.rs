@@ -200,7 +200,7 @@ impl FileHasher {
         assert!(abs_path.is_absolute());
         let computed_hash = self.compute_hash(abs_path)?;
         let rel_path = crate::strip_prefix(abs_path, self.cache.base_dir())?;
-        let cached_hash = self.cache.get_path(rel_path);
+        let cached_hash = self.cache.get_by_path(rel_path);
         let status = match cached_hash {
             None => CheckStatus::New,
             Some(cached) => {
@@ -218,7 +218,7 @@ impl FileHasher {
                     self.cache.insert(rel_path, modified, computed_hash);
                 }
                 CheckStatus::Unchanged => {
-                    if self.cache.get_path_time(rel_path, modified).is_none() {
+                    if self.cache.get(rel_path, modified).is_none() {
                         self.cache.insert(rel_path, modified, computed_hash);
                     }
                 }
@@ -387,7 +387,7 @@ impl FileHasher {
     ) {
         let relative = crate::strip_prefix(path, self.cache.base_dir())
             .expect("path should be in cache base_dir");
-        if let Some(hash) = self.cache.get_path_time(relative, modified) {
+        if let Some(hash) = self.cache.get(relative, modified) {
             self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
             let _ = tx.send(HashProgress::Result(path.to_path_buf(), size, hash, true));
             return;
@@ -413,7 +413,7 @@ impl FileHasher {
         let modified = meta.modified()?;
         let relative = crate::strip_prefix(path, self.cache.base_dir())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        if let Some(hash) = self.cache.get_path_time(relative, modified) {
+        if let Some(hash) = self.cache.get(relative, modified) {
             self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
             return Ok(hash);
         }
@@ -706,7 +706,7 @@ mod tests {
 
         let cache = FileHashCache::new(&dir_path);
         let mtime1 = fs::metadata(&file1_path)?.modified()?;
-        let hash1 = cache.get_path_time(&PathBuf::from("file1.txt"), mtime1);
+        let hash1 = cache.get(&PathBuf::from("file1.txt"), mtime1);
         assert!(hash1.is_some());
 
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -721,7 +721,7 @@ mod tests {
         hasher.save_cache()?;
 
         let cache = FileHashCache::new(&dir_path);
-        let hash_mod = cache.get_path_time(&PathBuf::from("file1.txt"), mtime1_mod);
+        let hash_mod = cache.get(&PathBuf::from("file1.txt"), mtime1_mod);
         assert!(hash_mod.is_some());
         assert_ne!(hash1, hash_mod);
 
@@ -732,7 +732,7 @@ mod tests {
 
         assert!(
             cache
-                .get_path_time(&PathBuf::from("file1.txt"), mtime1_mod2)
+                .get(&PathBuf::from("file1.txt"), mtime1_mod2)
                 .is_none()
         );
 
@@ -746,7 +746,7 @@ mod tests {
         let cache = FileHashCache::new(&dir_path);
         assert!(
             cache
-                .get_path_time(&PathBuf::from("file1.txt"), mtime1_mod2)
+                .get(&PathBuf::from("file1.txt"), mtime1_mod2)
                 .is_some()
         );
         Ok(())

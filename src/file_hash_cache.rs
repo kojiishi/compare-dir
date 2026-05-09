@@ -8,30 +8,12 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::FileComparer;
+use crate::SystemTimeExt;
 
 #[derive(Debug, Clone)]
 pub struct CacheEntry {
     pub hash: Hash,
     pub modified: SystemTime,
-}
-
-impl CacheEntry {
-    /// Returns true if the modified time is within 100ns tolerance.
-    /// This tolerance is needed because Windows `Duration` is based on
-    /// `FILETIME` and thus has 100ns resolution, while other platforms may have
-    /// higher (e.g. 1ns) resolution.
-    pub fn modified_matches(&self, modified: SystemTime) -> bool {
-        let diff = if modified > self.modified {
-            modified
-                .duration_since(self.modified)
-                .unwrap_or(Duration::ZERO)
-        } else {
-            self.modified
-                .duration_since(modified)
-                .unwrap_or(Duration::ZERO)
-        };
-        diff < Duration::from_nanos(100)
-    }
 }
 
 struct CacheState {
@@ -140,18 +122,18 @@ impl FileHashCache {
     }
 
     /// Retrieves an entry's hash from the cache, ignoring the modified time.
-    pub fn get_path(&self, path: &Path) -> Option<Hash> {
+    pub fn get_by_path(&self, path: &Path) -> Option<Hash> {
         assert!(path.is_relative());
         let state = self.state.lock().unwrap();
         state.entries.get(path).map(|entry| entry.hash)
     }
 
     /// Retrieves an entry's hash from the cache if the modified time matches.
-    pub fn get_path_time(&self, path: &Path, modified: SystemTime) -> Option<Hash> {
+    pub fn get(&self, path: &Path, modified: SystemTime) -> Option<Hash> {
         assert!(path.is_relative());
         let state = self.state.lock().unwrap();
         if let Some(entry) = state.entries.get(path)
-            && entry.modified_matches(modified)
+            && entry.modified.eq_nearly(modified)
         {
             return Some(entry.hash);
         }
@@ -335,7 +317,7 @@ mod tests {
             Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
 
         cache.insert(&path, modified, hash);
-        assert!(cache.get_path_time(&path, modified).is_some());
+        assert!(cache.get(&path, modified).is_some());
 
         cache.save()?;
 
@@ -354,7 +336,7 @@ mod tests {
         let loaded_cache = FileHashCache::find_or_new(&dir_path);
         assert_eq!(loaded_cache.base_dir(), dir_path);
 
-        let retrieved_hash = loaded_cache.get_path_time(&path, modified);
+        let retrieved_hash = loaded_cache.get(&path, modified);
         assert_eq!(retrieved_hash, Some(hash));
 
         Ok(())
@@ -371,10 +353,10 @@ mod tests {
             Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
 
         cache.insert(&path, modified, hash);
-        assert!(cache.get_path_time(&path, modified).is_some());
+        assert!(cache.get(&path, modified).is_some());
 
         cache.clear(Path::new(""));
-        assert!(cache.get_path_time(&path, modified).is_none());
+        assert!(cache.get(&path, modified).is_none());
         assert!(cache.state.lock().unwrap().is_dirty);
 
         Ok(())
@@ -394,12 +376,12 @@ mod tests {
         cache.insert(&path1, modified, hash);
         cache.insert(&path2, modified, hash);
 
-        assert!(cache.get_path_time(&path1, modified).is_some());
-        assert!(cache.get_path_time(&path2, modified).is_some());
+        assert!(cache.get(&path1, modified).is_some());
+        assert!(cache.get(&path2, modified).is_some());
 
         cache.clear(Path::new("a"));
-        assert!(cache.get_path_time(&path1, modified).is_none());
-        assert!(cache.get_path_time(&path2, modified).is_some());
+        assert!(cache.get(&path1, modified).is_none());
+        assert!(cache.get(&path2, modified).is_some());
 
         Ok(())
     }
@@ -519,10 +501,10 @@ mod tests {
         parent_cache.merge(&child_cache);
 
         // Verify parent has both
-        assert!(parent_cache.get_path_time(&path1, modified).is_some());
+        assert!(parent_cache.get(&path1, modified).is_some());
 
         let adjusted_path2 = PathBuf::from("sub").join(&path2);
-        let retrieved_hash2 = parent_cache.get_path_time(&adjusted_path2, modified);
+        let retrieved_hash2 = parent_cache.get(&adjusted_path2, modified);
         assert_eq!(retrieved_hash2, Some(hash2));
 
         // Verify child cache path is in merged_child_caches
@@ -539,7 +521,7 @@ mod tests {
 
         parent_cache.merge(&child_cache);
 
-        let retrieved = parent_cache.get_path_time(&adjusted_path2, modified);
+        let retrieved = parent_cache.get(&adjusted_path2, modified);
         assert_eq!(retrieved, Some(hash2));
 
         Ok(())
@@ -596,31 +578,15 @@ mod tests {
         cache.insert(&path, time, hash);
 
         // Lookup with exact time should work
-        assert!(cache.get_path_time(&path, time).is_some());
+        assert!(cache.get(&path, time).is_some());
 
         // Lookup with time differing by less than 100ns should work
-        assert!(
-            cache
-                .get_path_time(&path, time.add(Duration::new(0, 10)))
-                .is_some()
-        );
-        assert!(
-            cache
-                .get_path_time(&path, time.sub(Duration::new(0, 90)))
-                .is_some()
-        );
+        assert!(cache.get(&path, time.add(Duration::new(0, 10))).is_some());
+        assert!(cache.get(&path, time.sub(Duration::new(0, 90))).is_some());
 
         // Lookup with time differing by 100ns or more should fail
-        assert!(
-            cache
-                .get_path_time(&path, time.add(Duration::new(0, 100)))
-                .is_none()
-        );
-        assert!(
-            cache
-                .get_path_time(&path, time.sub(Duration::new(0, 100)))
-                .is_none()
-        );
+        assert!(cache.get(&path, time.add(Duration::new(0, 100))).is_none());
+        assert!(cache.get(&path, time.sub(Duration::new(0, 100))).is_none());
 
         Ok(())
     }
