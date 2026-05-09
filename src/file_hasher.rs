@@ -169,22 +169,20 @@ impl FileHasher {
                 let mut total_files = 0;
                 for (rel_path, abs_path) in it_rx {
                     total_files += 1;
-                    let tx_clone = tx.clone();
-                    let abs_path_owned = abs_path.clone();
-                    let rel_path_owned = rel_path.clone();
+                    let tx = tx.clone();
                     scope.spawn(move |_| {
-                        let status = self.check_file(&abs_path_owned, update);
+                        let status = self.check_file(&abs_path, update);
                         let event = match status {
                             Ok(CheckStatus::New) | Ok(CheckStatus::Modified) => {
-                                CheckEvent::Result(rel_path_owned, status.unwrap())
+                                CheckEvent::Result(rel_path, status.unwrap())
                             }
                             Ok(CheckStatus::Unchanged) => CheckEvent::FileDone,
                             Err(e) => {
-                                log::warn!("Failed to check file {:?}: {}", rel_path_owned, e);
+                                log::warn!("Failed to check file {:?}: {}", rel_path, e);
                                 CheckEvent::FileDone
                             }
                         };
-                        if tx_clone.send(event).is_err() {
+                        if tx.send(event).is_err() {
                             log::error!("Send failed");
                         }
                     });
