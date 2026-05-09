@@ -67,27 +67,24 @@ impl FileHashCache {
 
     /// Traverses the directory and its ancestors to find an existing cache file.
     /// Locks the global cache once during traversal.
-    fn find_cache_dir(path: &Path) -> &Path {
+    fn find_cache_dir(mut path: &Path) -> &Path {
         assert!(path.is_absolute());
         let map = GLOBAL_CACHES.lock().unwrap();
-        let dir = if path.is_dir() {
-            path
-        } else {
-            path.parent().unwrap()
-        };
-        let mut current = dir;
+        if !path.is_dir() {
+            path = path.parent().unwrap()
+        }
+        let mut current = path;
         loop {
             if map.contains_key(current) || current.join(Self::FILE_NAME).is_file() {
                 return current;
             }
-
             if let Some(parent) = current.parent() {
                 current = parent;
             } else {
                 break;
             }
         }
-        dir
+        path
     }
 
     /// Gets the base directory for this cache instance.
@@ -307,7 +304,10 @@ impl FileHashCache {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::{Add, Sub};
+    use std::{
+        fs,
+        ops::{Add, Sub},
+    };
 
     use super::*;
     use tempfile::tempdir;
@@ -365,6 +365,22 @@ mod tests {
         assert!(cache.get(&path, modified).is_none());
         assert!(cache.state.lock().unwrap().is_dirty);
 
+        Ok(())
+    }
+
+    #[test]
+    fn find_cache_dir() -> anyhow::Result<()> {
+        let dir = tempdir()?;
+        let subdir = dir.path().join("subdir");
+        fs::create_dir(&subdir)?;
+        assert_eq!(FileHashCache::find_cache_dir(&subdir), &subdir);
+
+        let cache_file_path = dir.path().join(FileHashCache::FILE_NAME);
+        {
+            let cache_file = File::create(&cache_file_path)?;
+            cache_file.sync_all()?;
+        }
+        assert_eq!(FileHashCache::find_cache_dir(&subdir), dir.path());
         Ok(())
     }
 
