@@ -37,6 +37,7 @@ impl FileHashCache {
     /// Creates a new cache instance or returns an existing one for the specified directory.
     pub fn new(dir: &Path) -> Arc<Self> {
         assert!(dir.is_absolute());
+        assert!(dir.is_dir());
         let mut map = GLOBAL_CACHES.lock().unwrap();
         if let Some(cache) = map.get(dir) {
             return cache.clone();
@@ -66,9 +67,14 @@ impl FileHashCache {
 
     /// Traverses the directory and its ancestors to find an existing cache file.
     /// Locks the global cache once during traversal.
-    fn find_cache_dir(dir: &Path) -> &Path {
-        assert!(dir.is_absolute());
+    fn find_cache_dir(path: &Path) -> &Path {
+        assert!(path.is_absolute());
         let map = GLOBAL_CACHES.lock().unwrap();
+        let dir = if path.is_dir() {
+            path
+        } else {
+            path.parent().unwrap()
+        };
         let mut current = dir;
         loop {
             if map.contains_key(current) || current.join(Self::FILE_NAME).is_file() {
@@ -359,6 +365,15 @@ mod tests {
         assert!(cache.get(&path, modified).is_none());
         assert!(cache.state.lock().unwrap().is_dirty);
 
+        Ok(())
+    }
+
+    #[test]
+    fn find_cache_dir_file() -> anyhow::Result<()> {
+        let dir = tempdir()?;
+        let file_path = dir.path().join("test.txt");
+        let cache_dir = FileHashCache::find_cache_dir(&file_path);
+        assert_eq!(cache_dir, dir.path());
         Ok(())
     }
 
