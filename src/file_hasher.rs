@@ -587,7 +587,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_mode_empty_cache() -> anyhow::Result<()> {
+    fn check_mode_empty_cache() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let dir_path = dir.path().to_path_buf();
         println!("{:?}", dir_path);
@@ -626,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_mode_with_cache() -> anyhow::Result<()> {
+    fn check_mode_with_cache() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let dir_path = dir.path().to_path_buf();
         let file1_path = dir.path().join("file1.txt");
@@ -690,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_mode() -> anyhow::Result<()> {
+    fn check_update_mode() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let dir_path = dir.path().to_path_buf();
         let file1_path = dir.path().join("file1.txt");
