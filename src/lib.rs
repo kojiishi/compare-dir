@@ -1,3 +1,4 @@
+mod column_formatter;
 mod dir_comparer;
 mod file_comparer;
 mod file_hash_cache;
@@ -7,6 +8,7 @@ mod progress;
 mod sort_stream;
 mod system_time_ext;
 
+pub(crate) use column_formatter::ColumnFormatter;
 pub use dir_comparer::{DirectoryComparer, FileComparisonMethod};
 pub use file_comparer::{Classification, FileComparer, FileComparisonResult};
 pub(crate) use file_hash_cache::FileHashCache;

@@ -1,6 +1,6 @@
 use crate::{
-    Classification, FileComparer, FileComparisonResult, FileHasher, FileIterator, Progress,
-    ProgressBuilder,
+    Classification, ColumnFormatter, FileComparer, FileComparisonResult, FileHasher, FileIterator,
+    Progress, ProgressBuilder,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
@@ -367,12 +367,10 @@ impl ComparisonSummary {
             ("Different content:", self.diff_content),
             ("Not comparable:", self.not_comparable),
         ];
-        let max_len = values.iter().map(|(s, _)| s.len()).max().unwrap();
-        writeln!(writer, "{:width$} {}", "Left:", dir1_name, width = max_len)?;
-        writeln!(writer, "{:width$} {}", "Right:", dir2_name, width = max_len)?;
-        for (label, value) in values {
-            writeln!(writer, "{:width$} {}", label, value, width = max_len)?;
-        }
+        let formatter = ColumnFormatter::new(values.iter().map(|(s, _)| *s));
+        formatter.write_value(&mut writer, "Left:", dir1_name)?;
+        formatter.write_value(&mut writer, "Right:", dir2_name)?;
+        formatter.write_values(&mut writer, values)?;
         Ok(())
     }
 }
