@@ -172,7 +172,7 @@ impl FileHasher {
             summary[0].0,
             FormattedDuration(start_time.elapsed()),
         )?;
-        formatter.write_values(&mut writer, summary.into_iter().skip(1))?;
+        formatter.write_values(&mut writer, &summary[1..])?;
         Ok(())
     }
 

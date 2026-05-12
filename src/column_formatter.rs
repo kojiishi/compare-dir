@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::fmt::Display;
 use std::io::{self, Write};
 
@@ -28,14 +29,16 @@ impl ColumnFormatter {
         writeln!(writer, "{:width$} {}", name, value, width = self.width)
     }
 
-    pub fn write_values<W, I, S, V>(&self, writer: &mut W, iter: I) -> io::Result<()>
+    pub fn write_values<W, I, T, S, V>(&self, writer: &mut W, iter: I) -> io::Result<()>
     where
         W: Write,
-        I: IntoIterator<Item = (S, V)>,
+        I: IntoIterator<Item = T>,
+        T: Borrow<(S, V)>,
         S: Display,
         V: Display,
     {
-        for (name, value) in iter {
+        for item in iter {
+            let (name, value) = item.borrow();
             self.write_value(writer, name, value)?;
         }
         Ok(())
