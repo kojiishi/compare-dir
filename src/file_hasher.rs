@@ -1,5 +1,6 @@
 use crate::{
-    DirectoryComparer, FileComparer, FileHashCache, FileIterator, Progress, ProgressBuilder,
+    ColumnFormatter, DirectoryComparer, FileComparer, FileHashCache, FileIterator, Progress,
+    ProgressBuilder,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
@@ -113,6 +114,8 @@ impl FileHasher {
             .map(|progress| progress.add_spinner())
             .unwrap_or_else(Progress::none);
         progress.set_message("Scanning directory...");
+        let mut num_new = 0;
+        let mut num_modified = 0;
         std::thread::scope(|scope| {
             let (tx, rx) = mpsc::channel();
             scope.spawn(|| {
@@ -130,17 +133,20 @@ impl FileHasher {
                         progress.set_message("");
                     }
                     CheckEvent::Result(path, status) => {
+                        let symbol = match status {
+                            CheckStatus::New => {
+                                num_new += 1;
+                                '+'
+                            }
+                            CheckStatus::Modified => {
+                                num_modified += 1;
+                                '!'
+                            }
+                            CheckStatus::Unchanged => unreachable!(),
+                        };
                         progress.inc(1);
                         progress.suspend(|| {
-                            println!(
-                                "{} {}",
-                                match status {
-                                    CheckStatus::New => '+',
-                                    CheckStatus::Modified => '!',
-                                    CheckStatus::Unchanged => unreachable!(),
-                                },
-                                path.display()
-                            );
+                            println!("{} {}", symbol, path.display());
                         });
                     }
                     CheckEvent::FileDone => {
@@ -153,7 +159,20 @@ impl FileHasher {
         if update {
             self.save_cache()?;
         }
-        eprintln!("Finished in {}.", FormattedDuration(start_time.elapsed()));
+        let summary = [
+            ("Elapsed:", 0),
+            ("Hash computed:", self.num_hashed.load(Ordering::Relaxed)),
+            ("New files:", num_new),
+            ("Modified files:", num_modified),
+        ];
+        let formatter = ColumnFormatter::new(summary.iter().map(|(s, _)| *s));
+        let mut writer = std::io::stderr();
+        formatter.write_value(
+            &mut writer,
+            summary[0].0,
+            FormattedDuration(start_time.elapsed()),
+        )?;
+        formatter.write_values(&mut writer, summary.into_iter().skip(1))?;
         Ok(())
     }
 
@@ -396,7 +415,6 @@ impl FileHasher {
         let tx_owned = tx.clone();
         scope.spawn(move |_| {
             if let Ok(hash) = self.compute_hash(&path_owned) {
-                self.num_hashed.fetch_add(1, Ordering::Relaxed);
                 self.cache.insert(&relative_owned, modified, hash);
                 let _ = tx_owned.send(HashProgress::Result(path_owned, size, hash, false));
             } else {
@@ -417,7 +435,6 @@ impl FileHasher {
         }
 
         let hash = self.compute_hash(path)?;
-        self.num_hashed.fetch_add(1, Ordering::Relaxed);
         self.cache.insert(relative, modified, hash);
         Ok(hash)
     }
@@ -450,12 +467,14 @@ impl FileHasher {
             }
         }
         progress.finish();
+        self.num_hashed.fetch_add(1, Ordering::Relaxed);
+        let hash = hasher.finalize();
         log::debug!(
             "Computed hash in {}: {:?}",
             FormattedDuration(start_time.elapsed()),
             path
         );
-        Ok(hasher.finalize())
+        Ok(hash)
     }
 }
 

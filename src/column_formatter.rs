@@ -22,23 +22,17 @@ impl ColumnFormatter {
     pub fn write_value<W, S, V>(&self, writer: &mut W, name: S, value: V) -> io::Result<()>
     where
         W: Write,
-        S: AsRef<str>,
+        S: Display,
         V: Display,
     {
-        writeln!(
-            writer,
-            "{:width$} {}",
-            name.as_ref(),
-            value,
-            width = self.width
-        )
+        writeln!(writer, "{:width$} {}", name, value, width = self.width)
     }
 
     pub fn write_values<W, I, S, V>(&self, writer: &mut W, iter: I) -> io::Result<()>
     where
         W: Write,
         I: IntoIterator<Item = (S, V)>,
-        S: AsRef<str>,
+        S: Display,
         V: Display,
     {
         for (name, value) in iter {
