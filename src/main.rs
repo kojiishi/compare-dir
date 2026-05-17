@@ -24,11 +24,9 @@ enum CompareMethod {
 #[derive(Parser, Debug)]
 #[command(version, about = "Compare two directories or find duplicate files.", long_about = None)]
 struct Args {
-    /// Path to the first directory (or target directory for duplication check).
-    dir1: PathBuf,
-
-    /// Path to the second directory. If omitted, find duplicate files in dir1.
-    dir2: Option<PathBuf>,
+    /// Paths to directories. For compare, exactly two paths. For duplication check, one path.
+    #[arg(required = true)]
+    paths: Vec<PathBuf>,
 
     /// Method for comparing files.
     #[arg(short, long, default_value = "hash")]
@@ -76,18 +74,22 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn compare_main(
-    mut args: Args,
+    args: Args,
     progress: ProgressBuilder,
     comparison_method: FileComparisonMethod,
 ) -> anyhow::Result<()> {
+    if args.paths.len() != 2 {
+        anyhow::bail!("\"{:?}\" mode requires two directories.", args.compare);
+    }
+    let mut paths = args.paths.into_iter();
+    let mut dir1 = paths.next().unwrap();
+    let mut dir2 = paths.next().unwrap();
+
     // Ensure paths are absolute. It helps when computing relative paths and
     // walking ancestors.
-    ensure_absolute_path(&mut args.dir1)?;
-    let Some(mut dir2) = args.dir2 else {
-        anyhow::bail!("\"{:?}\" mode requires two directories.", args.compare);
-    };
+    ensure_absolute_path(&mut dir1)?;
     ensure_absolute_path(&mut dir2)?;
-    let mut comparer = DirectoryComparer::new(args.dir1, dir2);
+    let mut comparer = DirectoryComparer::new(dir1, dir2);
     comparer.buffer_size = args.buffer * 1024;
     comparer.comparison_method = comparison_method;
     comparer.exclude = build_exclude(&args.exclude)?;
@@ -97,14 +99,16 @@ fn compare_main(
     comparer.run()
 }
 
-fn build_hasher(mut args: Args, progress: ProgressBuilder) -> anyhow::Result<FileHasher> {
-    // Ensure paths are absolute. It helps when computing relative paths and
-    // walking ancestors.
-    ensure_absolute_path(&mut args.dir1)?;
-    if args.dir2.is_some() {
+fn build_hasher(args: Args, progress: ProgressBuilder) -> anyhow::Result<FileHasher> {
+    if args.paths.len() != 1 {
         anyhow::bail!("\"{:?}\" mode only supports one directory.", args.compare);
     }
-    let mut hasher = FileHasher::new(args.dir1);
+    let mut dir1 = args.paths.into_iter().next().unwrap();
+
+    // Ensure paths are absolute. It helps when computing relative paths and
+    // walking ancestors.
+    ensure_absolute_path(&mut dir1)?;
+    let mut hasher = FileHasher::new(dir1);
     hasher.buffer_size = args.buffer * 1024;
     hasher.exclude = build_exclude(&args.exclude)?;
     hasher.jobs = args.jobs;
