@@ -87,6 +87,11 @@ impl FileHashCache {
         path
     }
 
+    fn remove_from_global_cache(dir: &Path) {
+        let mut map = GLOBAL_CACHES.lock().unwrap();
+        map.remove(dir);
+    }
+
     /// Gets the base directory for this cache instance.
     pub fn base_dir(&self) -> &Path {
         &self.base_dir
@@ -122,6 +127,7 @@ impl FileHashCache {
         );
 
         state.merged_child_caches.push(other.base_dir.clone());
+        Self::remove_from_global_cache(&other.base_dir);
     }
 
     /// Retrieves an entry's hash from the cache, ignoring the modified time.
@@ -334,10 +340,7 @@ mod tests {
         let dir_path = dir.path().to_path_buf();
 
         // Remove from global caches so find_or_new loads from disk
-        {
-            let mut map = GLOBAL_CACHES.lock().unwrap();
-            map.remove(&dir_path);
-        }
+        FileHashCache::remove_from_global_cache(&dir_path);
 
         let loaded_cache = FileHashCache::find_or_new(&dir_path);
         assert_eq!(loaded_cache.base_dir(), dir_path);
@@ -428,11 +431,8 @@ mod tests {
         File::create(&cache_path)?;
 
         // Clear global caches just in case
-        {
-            let mut map = GLOBAL_CACHES.lock().unwrap();
-            map.remove(dir.path());
-            map.remove(&subdir);
-        }
+        FileHashCache::remove_from_global_cache(dir.path());
+        FileHashCache::remove_from_global_cache(&subdir);
 
         // Find or new from subdir
         let cache = FileHashCache::find_or_new(&subdir);
