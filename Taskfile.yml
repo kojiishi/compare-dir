@@ -9,11 +9,11 @@ tasks:
   check:
     - task: tests
     - task: lints
-    - task: fmtcheck
+    - task: fmtchk
 
   fix: cargo clippy --fix {{.TARGET}} {{.FEATURE}} {{.CLIPPY}} {{.CLI_ARGS}}
   fmt: cargo fmt {{.FMT}} {{.CLI_ARGS}}
-  fmtcheck: cargo fmt --check {{.FMT}} {{.CLI_ARGS}}
+  fmtchk: cargo fmt --check {{.FMT}} {{.CLI_ARGS}}
   lint: cargo clippy {{.TARGET}} {{.FEATURE}} {{.CLIPPY}} {{.CLI_ARGS}}
   test:
     cmds:
@@ -30,6 +30,7 @@ tasks:
       - task: run
         vars: { TASK: test }
   run:
+    desc: Run the `TASK` variable for all features
     cmds:
       - for: { var: FEATURES }
         task: '{{.TASK}}'
@@ -39,7 +40,6 @@ tasks:
   install-git-hooks:
     desc: Create git hooks
     cmds:
-      - mkdir -p .git/hooks
       - echo '#!/bin/sh' > .git/hooks/pre-push
       - echo 'task check' >> .git/hooks/pre-push
       - cmd: chmod +x .git/hooks/pre-push
