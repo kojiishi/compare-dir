@@ -227,7 +227,7 @@ impl FileComparisonResult {
 mod tests {
     use super::*;
 
-    fn check_compare(content1: &[u8], content2: &[u8], expected: bool) -> io::Result<()> {
+    fn check_compare(content1: &[u8], content2: &[u8], expected: bool) -> anyhow::Result<()> {
         let dir1 = tempfile::tempdir()?;
         let dir2 = tempfile::tempdir()?;
         let f1_path = dir1.path().join("file");
@@ -245,8 +245,8 @@ mod tests {
         assert_eq!(comparer.compare_contents()?, expected);
 
         // With hashers
-        let hasher1 = FileHasher::new(dir1.path().to_path_buf());
-        let hasher2 = FileHasher::new(dir2.path().to_path_buf());
+        let hasher1 = FileHasher::new(&[dir1.path()])?;
+        let hasher2 = FileHasher::new(&[dir2.path()])?;
         comparer.hashers = Some((&hasher1, &hasher2));
         assert_eq!(comparer.compare_contents()?, expected);
 
@@ -254,22 +254,22 @@ mod tests {
     }
 
     #[test]
-    fn compare_contents_identical() -> io::Result<()> {
+    fn compare_contents_identical() -> anyhow::Result<()> {
         check_compare(b"hello world", b"hello world", true)
     }
 
     #[test]
-    fn compare_contents_different() -> io::Result<()> {
+    fn compare_contents_different() -> anyhow::Result<()> {
         check_compare(b"hello world", b"hello rust", false)
     }
 
     #[test]
-    fn compare_contents_different_size() -> io::Result<()> {
+    fn compare_contents_different_size() -> anyhow::Result<()> {
         check_compare(b"hello world", b"hello", false)
     }
 
     #[test]
-    fn compare_contents_empty_files() -> io::Result<()> {
+    fn compare_contents_empty_files() -> anyhow::Result<()> {
         check_compare(b"", b"", true)
     }
 

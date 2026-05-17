@@ -47,9 +47,9 @@ pub struct DuplicatedFiles {
 
 /// A tool for finding duplicated files in a directory.
 pub struct FileHasher {
-    dir: PathBuf,
+    dirs: Vec<PathBuf>,
     pub buffer_size: usize,
-    cache: Arc<FileHashCache>,
+    pub(crate) cache: Arc<FileHashCache>,
     pub(crate) num_hashed: AtomicUsize,
     pub(crate) num_hash_looked_up: AtomicUsize,
     pub exclude: Option<GlobSet>,
@@ -60,19 +60,23 @@ pub struct FileHasher {
 impl FileHasher {
     const DEFAULT_JOBS: usize = DirectoryComparer::DEFAULT_JOBS;
 
-    /// Creates a new `FileHasher` for the given directory.
-    pub fn new(dir: PathBuf) -> Self {
-        let cache = FileHashCache::find_or_new(&dir);
-        Self {
-            dir,
+    /// Creates a new `FileHasher` for the given directories.
+    pub fn new<P: AsRef<Path>>(dirs: &[P]) -> anyhow::Result<Self> {
+        if dirs.is_empty() {
+            anyhow::bail!("At least one directory must be specified.");
+        }
+        let common_ancestor = crate::common_ancestor(dirs)
+            .ok_or_else(|| anyhow::anyhow!("No common ancestor found"))?;
+        Ok(Self {
+            dirs: dirs.iter().map(|p| p.as_ref().to_path_buf()).collect(),
             buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
-            cache,
+            cache: FileHashCache::find_or_new(&common_ancestor),
             num_hashed: AtomicUsize::new(0),
             num_hash_looked_up: AtomicUsize::new(0),
             exclude: None,
             progress: None,
             jobs: Self::DEFAULT_JOBS,
-        }
+        })
     }
 
     /// Remove a cache entry if it exists.
@@ -86,7 +90,7 @@ impl FileHasher {
     pub fn save_cache(&self) -> anyhow::Result<()> {
         log::info!(
             "Hash stats for {:?}: {} computed, {} looked up",
-            self.dir,
+            self.dirs,
             self.num_hashed.load(Ordering::Relaxed),
             self.num_hash_looked_up.load(Ordering::Relaxed)
         );
@@ -100,13 +104,18 @@ impl FileHasher {
 
     /// Clears the loaded hashes in the cache.
     pub fn clear_cache(&self) -> anyhow::Result<()> {
-        let relative = crate::strip_prefix(&self.dir, self.cache.base_dir())?;
-        self.cache.clear(relative);
+        for dir in &self.dirs {
+            let relative = crate::strip_prefix(dir, self.cache.base_dir())?;
+            self.cache.clear(relative);
+        }
         Ok(())
     }
 
     /// Executes the check/update process.
     pub fn check(&self, update: bool) -> anyhow::Result<()> {
+        if self.dirs.len() > 1 {
+            anyhow::bail!("Check mode only supports one directory.");
+        }
         let start_time = std::time::Instant::now();
         let progress = self
             .progress
@@ -178,7 +187,7 @@ impl FileHasher {
 
     fn check_streaming(&self, tx: mpsc::Sender<CheckEvent>, update: bool) -> anyhow::Result<()> {
         std::thread::scope(|global_scope| {
-            let mut it = FileIterator::new(self.dir.clone());
+            let mut it = FileIterator::new(self.dirs[0].clone());
             it.hasher = Some(self);
             it.exclude = self.exclude.as_ref();
             let it_rx = it.spawn_in_scope(global_scope);
@@ -347,10 +356,16 @@ impl FileHasher {
         let mut by_size: HashMap<u64, EntryState> = HashMap::new();
         let mut total_hashed = 0;
         std::thread::scope(|global_scope| {
-            let mut it = FileIterator::new(self.dir.clone());
-            it.hasher = Some(self);
-            it.exclude = self.exclude.as_ref();
-            let it_rx = it.spawn_in_scope(global_scope);
+            let (it_tx, it_rx) = mpsc::channel();
+            for dir in &self.dirs {
+                let it_tx = it_tx.clone();
+                let mut it = FileIterator::new(dir.clone());
+                it.hasher = Some(self);
+                it.exclude = self.exclude.as_ref();
+                it.spawn_in_scope_with_sender(global_scope, it_tx);
+            }
+            drop(it_tx);
+
             let pool = crate::build_thread_pool(self.jobs)?;
             pool.scope(move |scope| -> anyhow::Result<()> {
                 for (_, current_path) in it_rx {
@@ -506,7 +521,7 @@ mod tests {
         let diff_path = dir.path().join("diff.txt");
         fs::write(&diff_path, "different content")?;
 
-        let mut hasher = FileHasher::new(dir.path().to_path_buf());
+        let mut hasher = FileHasher::new(&[dir.path()])?;
         hasher.buffer_size = 8192;
         let duplicates = hasher.find_duplicates()?;
 
@@ -543,7 +558,7 @@ mod tests {
         fs::File::create(&cache_aa_path)?;
 
         // Run find_duplicates on a/a
-        let hasher_aa = FileHasher::new(sub_dir.clone());
+        let hasher_aa = FileHasher::new(&[&sub_dir])?;
         let duplicates_aa = hasher_aa.find_duplicates()?;
         assert_eq!(duplicates_aa.len(), 1);
         assert!(cache_aa_path.exists());
@@ -556,7 +571,7 @@ mod tests {
         fs::File::create(&cache_a_path)?;
 
         // Run find_duplicates on a
-        let hasher_a = FileHasher::new(root_a.clone());
+        let hasher_a = FileHasher::new(&[&root_a])?;
         let duplicates_a = hasher_a.find_duplicates()?;
         assert_eq!(duplicates_a.len(), 1);
         assert_eq!(hasher_a.num_hashed.load(Ordering::Relaxed), 0);
@@ -582,7 +597,7 @@ mod tests {
         let exclude_path = dir.path().join("exclude.txt");
         fs::write(&exclude_path, "same content")?;
 
-        let mut hasher = FileHasher::new(dir.path().to_path_buf());
+        let mut hasher = FileHasher::new(&[dir.path()])?;
         hasher.buffer_size = 8192;
         let mut builder = globset::GlobSetBuilder::new();
         builder.add(
@@ -613,7 +628,7 @@ mod tests {
         let file2_path = dir.path().join("file2.txt");
         fs::write(&file2_path, "content 2")?;
 
-        let mut hasher = FileHasher::new(dir_path.clone());
+        let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, false)?;
@@ -651,14 +666,14 @@ mod tests {
         let file2_path = dir.path().join("file2.txt");
         fs::write(&file2_path, "content 2")?;
 
-        let mut hasher = FileHasher::new(dir_path.clone());
+        let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let _hash1 = hasher.get_hash(&file1_path)?;
         let _hash2 = hasher.get_hash(&file2_path)?;
         hasher.save_cache()?;
         assert!(dir.path().join(FileHashCache::FILE_NAME).exists());
 
-        let mut hasher = FileHasher::new(dir_path.clone());
+        let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, false)?;
@@ -684,7 +699,7 @@ mod tests {
         let mtime_after = file2_meta_after.modified()?;
         assert!(mtime_after > mtime_before);
 
-        let mut hasher = FileHasher::new(dir_path.clone());
+        let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, false)?;
@@ -713,7 +728,7 @@ mod tests {
         let file1_path = dir.path().join("file1.txt");
         fs::write(&file1_path, "content 1")?;
 
-        let mut hasher = FileHasher::new(dir_path.clone());
+        let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, true)?;
@@ -730,7 +745,7 @@ mod tests {
         fs::write(&file1_path, "content 1 modified")?;
         let mtime1_mod = fs::metadata(&file1_path)?.modified()?;
 
-        let mut hasher = FileHasher::new(dir_path.clone());
+        let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, true)?;
@@ -753,7 +768,7 @@ mod tests {
                 .is_none()
         );
 
-        let mut hasher = FileHasher::new(dir_path.clone());
+        let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, true)?;
@@ -766,6 +781,41 @@ mod tests {
                 .get(&PathBuf::from("file1.txt"), mtime1_mod2)
                 .is_some()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn find_duplicates_multiple_dirs() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
+        let dir1 = tmp.path().join("dir1");
+        let dir2 = tmp.path().join("dir2");
+        fs::create_dir(&dir1)?;
+        fs::create_dir(&dir2)?;
+        let file1_path = dir1.join("file1.txt");
+        fs::write(&file1_path, "same content")?;
+        let file2_path = dir2.join("file2.txt");
+        fs::write(&file2_path, "same content")?;
+        let hasher = FileHasher::new(&[&dir1, &dir2])?;
+        let duplicates = hasher.find_duplicates()?;
+        assert_eq!(duplicates.len(), 1);
+        let group = &duplicates[0];
+        assert_eq!(group.paths.len(), 2);
+        assert_eq!(group.size, 12);
+        assert!(group.paths.contains(&file1_path));
+        assert!(group.paths.contains(&file2_path));
+
+        Ok(())
+    }
+
+    #[test]
+    fn check_fails_with_multiple_dirs() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
+        let dir1 = tmp.path().join("dir1");
+        let dir2 = tmp.path().join("dir2");
+        fs::create_dir(&dir1)?;
+        fs::create_dir(&dir2)?;
+        let hasher = FileHasher::new(&[&dir1, &dir2])?;
+        assert!(hasher.check(false).is_err());
         Ok(())
     }
 }

@@ -19,7 +19,7 @@ pub use progress::ProgressBuilder;
 pub(crate) use sort_stream::sort_stream;
 pub(crate) use system_time_ext::SystemTimeExt;
 
-use std::path::{Path, StripPrefixError};
+use std::path::{Path, PathBuf, StripPrefixError};
 
 pub(crate) fn build_thread_pool(
     threads: usize,
@@ -62,6 +62,30 @@ pub(crate) fn strip_prefix<'a>(path: &'a Path, base: &Path) -> Result<&'a Path, 
     result
 }
 
+pub(crate) fn common_ancestor(paths: &[impl AsRef<Path>]) -> Option<PathBuf> {
+    if paths.is_empty() {
+        return None;
+    }
+    let mut iter = paths.iter();
+    let mut common = iter.next()?.as_ref().to_path_buf();
+    for path in iter {
+        let path = path.as_ref();
+        let mut new_common = PathBuf::new();
+        for (c, p) in common.components().zip(path.components()) {
+            if c == p {
+                new_common.push(c);
+            } else {
+                break;
+            }
+        }
+        common = new_common;
+        if common.as_os_str().is_empty() {
+            return None;
+        }
+    }
+    Some(common)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +119,37 @@ mod tests {
         assert_eq!(strip_prefix(path, base)?.to_str().unwrap(), r"dir1\dir2");
         // assert_eq!(path.strip_prefix(base)?.to_str().unwrap(), r"dir1\dir2");
         Ok(())
+    }
+
+    #[test]
+    fn common_ancestor_tests() {
+        let empty: &[PathBuf] = &[];
+        assert_eq!(common_ancestor(empty), None);
+
+        let p1 = Path::new("/a/b/c");
+        assert_eq!(common_ancestor(&[p1]), Some(PathBuf::from("/a/b/c")));
+
+        let p2 = Path::new("/a/b/d");
+        assert_eq!(common_ancestor(&[p1, p2]), Some(PathBuf::from("/a/b")));
+
+        let p3 = Path::new("/a/x/y");
+        assert_eq!(common_ancestor(&[p1, p2, p3]), Some(PathBuf::from("/a")));
+
+        let p4 = Path::new("/b/c");
+        assert_eq!(common_ancestor(&[p1, p4]), Some(PathBuf::from("/")));
+
+        // Prefix case
+        let p5 = Path::new("/a/b");
+        assert_eq!(common_ancestor(&[p1, p5]), Some(PathBuf::from("/a/b")));
+
+        // Relative paths (no common root)
+        let r1 = Path::new("a/b");
+        let r2 = Path::new("c/d");
+        assert_eq!(common_ancestor(&[r1, r2]), None);
+
+        // Mixed absolute/relative
+        let a1 = Path::new("/a/b");
+        let r3 = Path::new("a/b");
+        assert_eq!(common_ancestor(&[a1, r3]), None);
     }
 }
