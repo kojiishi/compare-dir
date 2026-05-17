@@ -23,14 +23,13 @@ impl<'a> FileIterator<'a> {
         }
     }
 
-    pub(crate) fn spawn_in_scope<'scope>(
+    pub(crate) fn spawn_in_scope_with_sender<'scope>(
         self,
         scope: &'scope std::thread::Scope<'scope, '_>,
-    ) -> mpsc::Receiver<(PathBuf, PathBuf)>
-    where
+        tx: mpsc::Sender<(PathBuf, PathBuf)>,
+    ) where
         'a: 'scope,
     {
-        let (tx, rx) = mpsc::channel();
         scope.spawn(move || {
             for item in self {
                 if tx.send(item).is_err() {
@@ -39,6 +38,17 @@ impl<'a> FileIterator<'a> {
                 }
             }
         });
+    }
+
+    pub(crate) fn spawn_in_scope<'scope>(
+        self,
+        scope: &'scope std::thread::Scope<'scope, '_>,
+    ) -> mpsc::Receiver<(PathBuf, PathBuf)>
+    where
+        'a: 'scope,
+    {
+        let (tx, rx) = mpsc::channel();
+        self.spawn_in_scope_with_sender(scope, tx);
         rx
     }
 }
@@ -63,6 +73,8 @@ impl<'a> Iterator for FileIterator<'a> {
                     } else if entry.file_type().is_dir()
                         && let Some(hasher) = self.hasher
                     {
+                        // If there's a hash cache in the directory, merge it.
+                        // Except the root directory, `WalkDir` emits it first.
                         let dir = entry.path();
                         if dir != self.dir {
                             let cache_path = dir.join(FileHashCache::FILE_NAME);

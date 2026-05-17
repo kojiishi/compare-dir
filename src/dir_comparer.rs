@@ -249,10 +249,10 @@ impl DirectoryComparer {
         if self.comparison_method == FileComparisonMethod::Hash
             || self.comparison_method == FileComparisonMethod::Rehash
         {
-            let (mut h1, mut h2) = rayon::join(
-                || FileHasher::new(dir1.to_path_buf()),
-                || FileHasher::new(dir2.to_path_buf()),
-            );
+            let (h1_res, h2_res) =
+                rayon::join(|| FileHasher::new(&[dir1]), || FileHasher::new(&[dir2]));
+            let mut h1 = h1_res?;
+            let mut h2 = h2_res?;
             h1.buffer_size = self.buffer_size;
             h2.buffer_size = self.buffer_size;
             if let Some(progress) = self.progress.as_ref() {
