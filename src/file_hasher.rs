@@ -38,13 +38,6 @@ enum EntryState {
     Hashing,
 }
 
-/// A group of duplicated files and their size.
-#[derive(Debug, Clone)]
-pub struct DuplicatedFiles {
-    pub paths: Vec<PathBuf>,
-    pub size: u64,
-}
-
 /// A tool for finding duplicated files in a directory.
 pub struct FileHasher {
     dirs: Vec<PathBuf>,
@@ -54,6 +47,7 @@ pub struct FileHasher {
     pub(crate) num_hash_looked_up: AtomicUsize,
     pub exclude: Option<GlobSet>,
     pub progress: Option<Arc<ProgressBuilder>>,
+    pub is_yaml_format: bool,
     pub jobs: usize,
 }
 
@@ -75,6 +69,7 @@ impl FileHasher {
             num_hash_looked_up: AtomicUsize::new(0),
             exclude: None,
             progress: None,
+            is_yaml_format: false,
             jobs: Self::DEFAULT_JOBS,
         })
     }
@@ -258,22 +253,17 @@ impl FileHasher {
         let start_time = std::time::Instant::now();
         let mut duplicates = self.find_duplicates()?;
         if duplicates.is_empty() {
-            println!("No duplicates found.");
+            eprintln!("No duplicates found.");
         } else {
             duplicates.sort_by_key(|a| a.size);
             let mut total_wasted_space = 0;
             for dupes in &duplicates {
-                let paths = &dupes.paths;
-                let file_size = dupes.size;
-                println!(
-                    "Identical {} files of {}:",
-                    paths.len(),
-                    crate::human_readable_size(file_size)
-                );
-                for path in paths {
-                    println!("  {}", path.display());
+                if self.is_yaml_format {
+                    dupes.write_yaml(std::io::stdout())?;
+                } else {
+                    dupes.write_human(std::io::stdout())?;
                 }
-                total_wasted_space += file_size * (paths.len() as u64 - 1);
+                total_wasted_space += dupes.wasted_size();
             }
             eprintln!(
                 "Total wasted space: {}",
@@ -490,6 +480,41 @@ impl FileHasher {
             path
         );
         Ok(hash)
+    }
+}
+
+/// A group of duplicated files and their size.
+#[derive(Clone, Debug)]
+pub struct DuplicatedFiles {
+    pub paths: Vec<PathBuf>,
+    pub size: u64,
+}
+
+impl DuplicatedFiles {
+    fn write_human(&self, mut writer: impl io::Write) -> anyhow::Result<()> {
+        writeln!(
+            writer,
+            "Identical {} files of {}:",
+            self.paths.len(),
+            crate::human_readable_size(self.size)
+        )?;
+        for path in &self.paths {
+            writeln!(writer, "  {}", path.display())?;
+        }
+        Ok(())
+    }
+
+    fn write_yaml(&self, mut writer: impl io::Write) -> anyhow::Result<()> {
+        writeln!(writer, "- paths:")?;
+        for path in &self.paths {
+            writeln!(writer, "  - {:?}", path)?;
+        }
+        writeln!(writer, "  size: {}", self.size)?;
+        Ok(())
+    }
+
+    fn wasted_size(&self) -> u64 {
+        self.size * (self.paths.len() as u64 - 1)
     }
 }
 

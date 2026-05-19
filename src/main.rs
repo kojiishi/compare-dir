@@ -107,6 +107,7 @@ fn build_hasher(args: Args, progress: ProgressBuilder) -> anyhow::Result<FileHas
     let mut hasher = FileHasher::new(&args.paths)?;
     hasher.buffer_size = args.buffer * 1024;
     hasher.exclude = build_exclude(&args.exclude)?;
+    hasher.is_yaml_format = args.symbol;
     hasher.jobs = args.jobs;
     hasher.progress = Some(Arc::new(progress));
     Ok(hasher)

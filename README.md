@@ -29,6 +29,8 @@ cargo install compare-dir
 
 See [Releases] for the change history.
 
+[Releases]: https://github.com/kojiishi/compare-dir/releases
+
 ## Usages
 
 `compare-dir` supports the following features:
@@ -166,7 +168,14 @@ with the `-c dup` option.
 compare-dir -c dup <dir>
 ```
 
-[Releases]: https://github.com/kojiishi/compare-dir/releases
+The `--symbol` (or `-s` for short) prints the results in the YAML format.
+Please use other tools such as [yq] if you need to
+convert the YAML results to JSON or other formats.
+```shell-session
+compare-dir -s -c dup <dir> | yq -o json
+```
+
+[yq]: https://github.com/mikefarah/yq
 
 ## Hash
 
