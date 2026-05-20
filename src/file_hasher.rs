@@ -4,12 +4,18 @@ use crate::{
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
-use std::collections::HashMap;
-use std::fs;
-use std::io::{self, Read, stdout};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, mpsc};
+use std::{
+    collections::HashMap,
+    fs,
+    io::{self, Read, stdout},
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
+    time,
+};
 
 #[derive(Debug, Clone)]
 enum HashProgress {
@@ -34,7 +40,7 @@ enum CheckEvent {
 }
 
 enum EntryState {
-    Single(PathBuf, std::time::SystemTime),
+    Single(PathBuf, time::SystemTime),
     Hashing,
 }
 
@@ -111,7 +117,7 @@ impl FileHasher {
         if self.dirs.len() > 1 {
             anyhow::bail!("Check mode only supports one directory.");
         }
-        let start_time = std::time::Instant::now();
+        let start_time = time::Instant::now();
         let progress = self
             .progress
             .as_ref()
@@ -163,6 +169,16 @@ impl FileHasher {
         if update {
             self.save_cache()?;
         }
+        self.print_check_summary(&start_time, num_new, num_modified)?;
+        Ok(())
+    }
+
+    fn print_check_summary(
+        &self,
+        start_time: &time::Instant,
+        num_new: usize,
+        num_modified: usize,
+    ) -> io::Result<()> {
         let summary = [
             ("Elapsed:", 0),
             ("Hash computed:", self.num_hashed.load(Ordering::Relaxed)),
@@ -176,8 +192,7 @@ impl FileHasher {
             summary[0].0,
             FormattedDuration(start_time.elapsed()),
         )?;
-        formatter.write_values(&mut writer, &summary[1..])?;
-        Ok(())
+        formatter.write_values(&mut writer, &summary[1..])
     }
 
     fn check_streaming(&self, tx: mpsc::Sender<CheckEvent>, update: bool) -> anyhow::Result<()> {
@@ -250,13 +265,11 @@ impl FileHasher {
 
     /// Executes the duplicate file finding process and prints results.
     pub fn run(&self) -> anyhow::Result<()> {
-        let start_time = std::time::Instant::now();
+        let start_time = time::Instant::now();
         let mut duplicates = self.find_duplicates()?;
-        if duplicates.is_empty() {
-            eprintln!("No duplicates found.");
-        } else {
+        let mut total_wasted_space = 0;
+        if !duplicates.is_empty() {
             duplicates.sort_by_key(|a| a.size);
-            let mut total_wasted_space = 0;
             for dupes in &duplicates {
                 if self.is_yaml_format {
                     dupes.write_yaml(std::io::stdout())?;
@@ -265,13 +278,28 @@ impl FileHasher {
                 }
                 total_wasted_space += dupes.wasted_size();
             }
-            eprintln!(
-                "Total wasted space: {}",
-                crate::human_readable_size(total_wasted_space)
-            );
         }
-        eprintln!("Finished in {}.", FormattedDuration(start_time.elapsed()));
+        self.print_duplicates_summary(&start_time, total_wasted_space)?;
         Ok(())
+    }
+
+    fn print_duplicates_summary(
+        &self,
+        start_time: &time::Instant,
+        total_wasted_space: u64,
+    ) -> io::Result<()> {
+        let summary = [
+            (
+                "Elapsed:",
+                FormattedDuration(start_time.elapsed()).to_string(),
+            ),
+            (
+                "Total wasted space:",
+                crate::human_readable_size(total_wasted_space),
+            ),
+        ];
+        let formatter = ColumnFormatter::new(summary.iter().map(|(s, _)| *s));
+        formatter.write_values(&mut io::stderr(), &summary)
     }
 
     /// Finds duplicated files and returns a list of duplicate groups.
@@ -404,7 +432,7 @@ impl FileHasher {
         scope: &rayon::Scope<'scope>,
         path: &Path,
         size: u64,
-        modified: std::time::SystemTime,
+        modified: time::SystemTime,
         tx: &mpsc::Sender<HashProgress>,
     ) {
         let relative = crate::strip_prefix(path, self.cache.base_dir())
@@ -445,7 +473,7 @@ impl FileHasher {
     }
 
     fn compute_hash(&self, path: &Path) -> io::Result<blake3::Hash> {
-        let start_time = std::time::Instant::now();
+        let start_time = time::Instant::now();
         let mut f = fs::File::open(path)?;
         let len = f.metadata()?.len();
         let progress = self
@@ -718,7 +746,7 @@ mod tests {
 
         let file2_meta_before = fs::metadata(&file2_path)?;
         let mtime_before = file2_meta_before.modified()?;
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(time::Duration::from_millis(10));
         fs::write(&file2_path, "content 2")?;
         let file2_meta_after = fs::metadata(&file2_path)?;
         let mtime_after = file2_meta_after.modified()?;
@@ -766,7 +794,7 @@ mod tests {
         let hash1 = cache.get(&PathBuf::from("file1.txt"), mtime1);
         assert!(hash1.is_some());
 
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(time::Duration::from_millis(10));
         fs::write(&file1_path, "content 1 modified")?;
         let mtime1_mod = fs::metadata(&file1_path)?.modified()?;
 
@@ -782,7 +810,7 @@ mod tests {
         assert!(hash_mod.is_some());
         assert_ne!(hash1, hash_mod);
 
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(time::Duration::from_millis(10));
         fs::write(&file1_path, "content 1 modified")?;
         let mtime1_mod2 = fs::metadata(&file1_path)?.modified()?;
         assert!(mtime1_mod2 > mtime1_mod);
