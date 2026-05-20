@@ -11,8 +11,10 @@
 
 # compare-dir
 
-A command line tool to compare two directories and show the differences.
-It can also find changed, corrupted, and duplicated files.
+A command line tool to
+[compare two directories and show the differences][compare directories].
+It can also [find changed, corrupted][find changed files],
+and [duplicated files][find duplicates].
 
 ## Installation
 
