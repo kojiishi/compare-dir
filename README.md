@@ -117,7 +117,7 @@ compare-dir -s <dir1> <dir2> | grep '^..!' | sed 's/^....//'
 ```
 To do this in PowerShell:
 ```powershell
-compare-dir -s <dir1> <dir2> | sls '^..!' | %{$_ -replace '^....',''}
+(compare-dir -s <dir1> <dir2>) -match '^..!' -replace '^....'
 ```
 
 ### Find Changed or Corrupted Files
