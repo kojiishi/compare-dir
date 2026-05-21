@@ -52,7 +52,8 @@ impl FileHashCache {
                 merged_child_caches: Vec::new(),
             }),
         });
-        map.insert(dir.to_path_buf(), cache.clone());
+        let old_value = map.insert(dir.to_path_buf(), cache.clone());
+        assert!(old_value.is_none());
         cache
     }
 
