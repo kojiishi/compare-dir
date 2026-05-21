@@ -39,6 +39,10 @@ impl FileHashCache {
         assert!(dir.is_absolute());
         assert!(dir.is_dir());
         let mut map = GLOBAL_CACHES.lock().unwrap();
+        Self::new_with_map(dir, &mut map)
+    }
+
+    fn new_with_map(dir: &Path, map: &mut HashMap<PathBuf, Arc<Self>>) -> Arc<Self> {
         if let Some(cache) = map.get(dir) {
             return cache.clone();
         }
@@ -62,17 +66,26 @@ impl FileHashCache {
     /// If no cache is found in the current directory or ancestors, creates a new one in `dir`.
     pub fn find_or_new(dir: &Path) -> Arc<Self> {
         assert!(dir.is_absolute());
-        let cache_dir = Self::find_cache_dir(dir);
-        Self::new(cache_dir)
+        let mut map = GLOBAL_CACHES.lock().unwrap();
+        let cache_dir = Self::find_cache_dir_with_map(dir, &map);
+        Self::new_with_map(cache_dir, &mut map)
     }
 
     /// Traverses the directory and its ancestors to find an existing cache file.
     /// Locks the global cache once during traversal.
-    fn find_cache_dir(mut path: &Path) -> &Path {
-        assert!(path.is_absolute());
+    #[cfg(test)]
+    fn find_cache_dir(path: &Path) -> &Path {
         let map = GLOBAL_CACHES.lock().unwrap();
+        Self::find_cache_dir_with_map(path, &map)
+    }
+
+    fn find_cache_dir_with_map<'a>(
+        mut path: &'a Path,
+        map: &HashMap<PathBuf, Arc<Self>>,
+    ) -> &'a Path {
+        assert!(path.is_absolute());
         if !path.is_dir() {
-            path = path.parent().unwrap()
+            path = path.parent().unwrap();
         }
         let mut current = path;
         loop {
@@ -444,6 +457,34 @@ mod tests {
         // The cache should be empty
         assert_eq!(cache.state.lock().unwrap().entries.len(), 0);
 
+        Ok(())
+    }
+
+    #[test]
+    fn find_or_new_concurrent() -> anyhow::Result<()> {
+        use std::{sync::Barrier, thread};
+        let dir = tempdir()?;
+        let num_threads = 10;
+        let barrier = Barrier::new(num_threads);
+        let mut results = Vec::new();
+        thread::scope(|s| {
+            let mut handles = Vec::new();
+            for _ in 0..num_threads {
+                handles.push(s.spawn(|| {
+                    barrier.wait();
+                    FileHashCache::find_or_new(dir.path())
+                }));
+            }
+            for handle in handles {
+                results.push(handle.join().unwrap());
+            }
+        });
+
+        // All returned caches should be the exact same Arc instance
+        let first = &results[0];
+        for other in &results[1..] {
+            assert!(Arc::ptr_eq(first, other));
+        }
         Ok(())
     }
 
