@@ -297,15 +297,13 @@ impl FileHasher {
         start_time: &time::Instant,
         total_wasted_space: u64,
     ) -> io::Result<()> {
+        let elapsed = FormattedDuration(start_time.elapsed()).to_string();
+        let num_hashed = self.num_hashed.load(Ordering::Relaxed).to_string();
+        let total_wasted_space = crate::human_readable_size(total_wasted_space);
         let summary = [
-            (
-                "Elapsed:",
-                FormattedDuration(start_time.elapsed()).to_string(),
-            ),
-            (
-                "Total wasted space:",
-                crate::human_readable_size(total_wasted_space),
-            ),
+            ("Elapsed:", elapsed),
+            ("Hash computed:", num_hashed),
+            ("Total wasted space:", total_wasted_space),
         ];
         let formatter = ColumnFormatter::new(summary.iter().map(|(s, _)| *s));
         formatter.write_values(&mut io::stderr(), &summary)
