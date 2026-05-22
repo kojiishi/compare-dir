@@ -118,10 +118,7 @@ impl DirectoryComparer {
                         }
                     }
                     CompareProgress::FileDone => progress.inc(1),
-                    CompareProgress::Error => {
-                        summary.num_errors += 1;
-                        progress.inc(1);
-                    }
+                    CompareProgress::Error => summary.num_errors += 1,
                 }
             }
         });
