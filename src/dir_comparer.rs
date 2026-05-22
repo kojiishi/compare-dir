@@ -6,9 +6,10 @@ use globset::GlobSet;
 use indicatif::FormattedDuration;
 use std::{
     cmp::Ordering,
-    io::stdout,
+    io::{self, stdout},
     path::{Path, PathBuf},
     sync::{Arc, mpsc},
+    time,
 };
 
 #[derive(Debug, Clone)]
@@ -124,11 +125,7 @@ impl DirectoryComparer {
         });
         progress.finish();
         eprintln!("\n--- Comparison Summary ---");
-        summary.print(&mut std::io::stderr(), dir1_str, dir2_str)?;
-        eprintln!(
-            "Comparison finished in {}.",
-            FormattedDuration(start_time.elapsed())
-        );
+        summary.print(&mut io::stderr(), &start_time, dir1_str, dir2_str)?;
         Ok(())
     }
 
@@ -363,10 +360,12 @@ impl ComparisonSummary {
     pub fn print(
         &self,
         mut writer: impl std::io::Write,
+        start_time: &time::Instant,
         dir1_name: &str,
         dir2_name: &str,
     ) -> std::io::Result<()> {
         let values = [
+            ("Elapsed:", 0),
             ("Files in both:", self.in_both),
             ("Only in left:", self.only_in_dir1),
             ("Only in right:", self.only_in_dir2),
@@ -381,7 +380,12 @@ impl ComparisonSummary {
         let formatter = ColumnFormatter::new(values.iter().map(|(s, _)| *s));
         formatter.write_value(&mut writer, "Left:", dir1_name)?;
         formatter.write_value(&mut writer, "Right:", dir2_name)?;
-        formatter.write_values(&mut writer, values)?;
+        formatter.write_value(
+            &mut writer,
+            values[0].0,
+            FormattedDuration(start_time.elapsed()),
+        )?;
+        formatter.write_values(&mut writer, &values[1..])?;
         Ok(())
     }
 }
