@@ -17,6 +17,7 @@ enum CompareProgress {
     FileDone,
     TotalFiles(usize),
     Result(usize, FileComparisonResult),
+    Error,
 }
 
 /// Methods for comparing files.
@@ -117,6 +118,10 @@ impl DirectoryComparer {
                         }
                     }
                     CompareProgress::FileDone => progress.inc(1),
+                    CompareProgress::Error => {
+                        summary.num_errors += 1;
+                        progress.inc(1);
+                    }
                 }
             }
         });
@@ -213,14 +218,18 @@ impl DirectoryComparer {
                                     rel_path.clone(),
                                     Classification::InBoth,
                                 );
-                                if let Err(error) = result.update(&comparer, should_compare) {
-                                    log::error!(
-                                        "Error during comparison of {:?}: {}",
-                                        rel_path,
-                                        error
-                                    );
-                                }
-                                if tx_clone.send(CompareProgress::Result(i, result)).is_err()
+                                let event = match result.update(&comparer, should_compare) {
+                                    Ok(_) => CompareProgress::Result(i, result),
+                                    Err(error) => {
+                                        log::error!(
+                                            "Error during comparison of {:?}: {}",
+                                            rel_path,
+                                            error
+                                        );
+                                        CompareProgress::Error
+                                    }
+                                };
+                                if tx_clone.send(event).is_err()
                                     || tx_clone.send(CompareProgress::FileDone).is_err()
                                 {
                                     log::error!("Send failed during comparison of {:?}", rel_path);
@@ -320,6 +329,7 @@ struct ComparisonSummary {
     pub dir2_larger: usize,
     pub diff_content: usize,
     pub not_comparable: usize,
+    pub num_errors: usize,
 }
 
 impl ComparisonSummary {
@@ -369,6 +379,7 @@ impl ComparisonSummary {
             ("Right is larger:", self.dir2_larger),
             ("Different content:", self.diff_content),
             ("Not comparable:", self.not_comparable),
+            ("Errors:", self.num_errors),
         ];
         let formatter = ColumnFormatter::new(values.iter().map(|(s, _)| *s));
         formatter.write_value(&mut writer, "Left:", dir1_name)?;

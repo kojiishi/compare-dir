@@ -22,6 +22,7 @@ enum HashProgress {
     StartDiscovering,
     TotalFiles(usize),
     Result(PathBuf, u64, blake3::Hash, bool),
+    Error,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -37,6 +38,7 @@ enum CheckEvent {
     TotalFiles(usize),
     Result(PathBuf, CheckStatus),
     FileDone,
+    Error,
 }
 
 enum EntryState {
@@ -126,6 +128,7 @@ impl FileHasher {
         progress.set_message("Scanning directory...");
         let mut num_new = 0;
         let mut num_modified = 0;
+        let mut num_error = 0;
         std::thread::scope(|scope| {
             let (tx, rx) = mpsc::channel();
             scope.spawn(|| {
@@ -162,6 +165,10 @@ impl FileHasher {
                     CheckEvent::FileDone => {
                         progress.inc(1);
                     }
+                    CheckEvent::Error => {
+                        progress.inc(1);
+                        num_error += 1;
+                    }
                 }
             }
         });
@@ -169,7 +176,7 @@ impl FileHasher {
         if update {
             self.save_cache()?;
         }
-        self.print_check_summary(&start_time, num_new, num_modified)?;
+        self.print_check_summary(&start_time, num_new, num_modified, num_error)?;
         Ok(())
     }
 
@@ -178,12 +185,14 @@ impl FileHasher {
         start_time: &time::Instant,
         num_new: usize,
         num_modified: usize,
+        num_error: usize,
     ) -> io::Result<()> {
         let summary = [
             ("Elapsed:", 0),
             ("Hash computed:", self.num_hashed.load(Ordering::Relaxed)),
             ("New files:", num_new),
             ("Modified files:", num_modified),
+            ("Errors:", num_error),
         ];
         let formatter = ColumnFormatter::new(summary.iter().map(|(s, _)| *s));
         let mut writer = std::io::stderr();
@@ -216,8 +225,8 @@ impl FileHasher {
                             }
                             Ok(CheckStatus::Unchanged) => CheckEvent::FileDone,
                             Err(e) => {
-                                log::warn!("Failed to check file {:?}: {}", rel_path, e);
-                                CheckEvent::FileDone
+                                log::error!("Failed to check file {:?}: {}", rel_path, e);
+                                CheckEvent::Error
                             }
                         };
                         if tx.send(event).is_err() {
@@ -354,6 +363,9 @@ impl FileHasher {
                         assert_eq!(entry.size, size, "Hash collision: sizes do not match");
                         entry.paths.push(path);
                     }
+                    HashProgress::Error => {
+                        progress.inc(1);
+                    }
                 }
             }
         });
@@ -451,7 +463,8 @@ impl FileHasher {
                 self.cache.insert(&relative_owned, modified, hash);
                 let _ = tx_owned.send(HashProgress::Result(path_owned, size, hash, false));
             } else {
-                log::warn!("Failed to hash file: {:?}", path_owned);
+                log::error!("Failed to hash file: {:?}", path_owned);
+                let _ = tx_owned.send(HashProgress::Error);
             }
         });
     }
@@ -689,17 +702,20 @@ mod tests {
         let mut start_seen = false;
         let mut total_files = None;
         let mut file_done_count = 0;
+        let mut num_error = 0;
         while let Ok(event) = rx.recv() {
             match event {
                 CheckEvent::StartChecking => start_seen = true,
                 CheckEvent::TotalFiles(total) => total_files = Some(total),
                 CheckEvent::Result(path, status) => results.push((path, status)),
                 CheckEvent::FileDone => file_done_count += 1,
+                CheckEvent::Error => num_error += 1,
             }
         }
         assert!(start_seen);
         assert_eq!(total_files, Some(2));
         assert_eq!(file_done_count, 0);
+        assert_eq!(num_error, 0);
 
         results.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(results.len(), 2);
