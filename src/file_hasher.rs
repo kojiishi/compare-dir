@@ -409,8 +409,8 @@ impl FileHasher {
                             EntryState::Single(first_path, first_modified) => {
                                 // We found a second file of identical size.
                                 // Time to start hashing both the *original* matching file and the *new* one!
-                                self.spawn_hash_task(scope, first_path, size, *first_modified, &tx);
-                                self.spawn_hash_task(scope, &current_path, size, modified, &tx);
+                                self.spawn_hash_task(first_path, size, *first_modified, scope, &tx);
+                                self.spawn_hash_task(&current_path, size, modified, scope, &tx);
 
                                 // Modify the state to indicate we are now fully hashing this size bucket.
                                 *occ.get_mut() = EntryState::Hashing;
@@ -418,7 +418,7 @@ impl FileHasher {
                             }
                             EntryState::Hashing => {
                                 // File size bucket already hashing; just dynamically spawn the new file immediately.
-                                self.spawn_hash_task(scope, &current_path, size, modified, &tx);
+                                self.spawn_hash_task(&current_path, size, modified, scope, &tx);
                                 total_hashed += 1;
                             }
                         },
@@ -439,30 +439,30 @@ impl FileHasher {
 
     fn spawn_hash_task<'scope>(
         &'scope self,
-        scope: &rayon::Scope<'scope>,
         path: &Path,
         size: u64,
         modified: time::SystemTime,
+        scope: &rayon::Scope<'scope>,
         tx: &mpsc::Sender<HashProgress>,
     ) {
-        let relative = crate::strip_prefix(path, self.cache.base_dir())
+        let (hash, relative) = self
+            .get_hash_from_cache(path, modified)
             .expect("path should be in cache base_dir");
-        if let Some(hash) = self.cache.get(relative, modified) {
-            self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
+        if let Some(hash) = hash {
             let _ = tx.send(HashProgress::Result(path.to_path_buf(), size, hash, true));
             return;
         }
 
-        let path_owned = path.to_path_buf();
-        let relative_owned = relative.to_path_buf();
-        let tx_owned = tx.clone();
+        let path = path.to_path_buf();
+        let relative = relative.to_path_buf();
+        let tx = tx.clone();
         scope.spawn(move |_| {
-            if let Ok(hash) = self.compute_hash(&path_owned) {
-                self.cache.insert(&relative_owned, modified, hash);
-                let _ = tx_owned.send(HashProgress::Result(path_owned, size, hash, false));
+            if let Ok(hash) = self.compute_hash(&path) {
+                self.cache.insert(&relative, modified, hash);
+                let _ = tx.send(HashProgress::Result(path, size, hash, false));
             } else {
-                log::error!("Failed to hash file: {:?}", path_owned);
-                let _ = tx_owned.send(HashProgress::Error);
+                log::error!("Failed to hash file: {:?}", path);
+                let _ = tx.send(HashProgress::Error);
             }
         });
     }
@@ -471,16 +471,28 @@ impl FileHasher {
     pub fn get_hash(&self, path: &Path) -> io::Result<blake3::Hash> {
         let meta = fs::metadata(path)?;
         let modified = meta.modified()?;
-        let relative = crate::strip_prefix(path, self.cache.base_dir())
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        if let Some(hash) = self.cache.get(relative, modified) {
-            self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
+        let (hash, relative) = self.get_hash_from_cache(path, modified)?;
+        if let Some(hash) = hash {
             return Ok(hash);
         }
 
         let hash = self.compute_hash(path)?;
         self.cache.insert(relative, modified, hash);
         Ok(hash)
+    }
+
+    fn get_hash_from_cache<'a>(
+        &self,
+        path: &'a Path,
+        modified: time::SystemTime,
+    ) -> io::Result<(Option<blake3::Hash>, &'a Path)> {
+        let relative = crate::strip_prefix(path, self.cache.base_dir())
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+        if let Some(hash) = self.cache.get(relative, modified) {
+            self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
+            return Ok((Some(hash), relative));
+        }
+        Ok((None, relative))
     }
 
     fn compute_hash(&self, path: &Path) -> io::Result<blake3::Hash> {
