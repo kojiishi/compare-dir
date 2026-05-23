@@ -26,7 +26,7 @@ impl<'a> FileIterator<'a> {
     pub(crate) fn spawn_in_scope_with_sender<'scope>(
         self,
         scope: &'scope std::thread::Scope<'scope, '_>,
-        tx: mpsc::Sender<(PathBuf, PathBuf)>,
+        tx: mpsc::Sender<PathBuf>,
     ) where
         'a: 'scope,
     {
@@ -43,7 +43,7 @@ impl<'a> FileIterator<'a> {
     pub(crate) fn spawn_in_scope<'scope>(
         self,
         scope: &'scope std::thread::Scope<'scope, '_>,
-    ) -> mpsc::Receiver<(PathBuf, PathBuf)>
+    ) -> mpsc::Receiver<PathBuf>
     where
         'a: 'scope,
     {
@@ -54,7 +54,7 @@ impl<'a> FileIterator<'a> {
 }
 
 impl<'a> Iterator for FileIterator<'a> {
-    type Item = (PathBuf, PathBuf);
+    type Item = PathBuf;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(entry) = self.iter.next() {
@@ -68,8 +68,7 @@ impl<'a> Iterator for FileIterator<'a> {
                     }
 
                     if entry.file_type().is_file() {
-                        let rel_path = crate::strip_prefix(entry.path(), &self.dir).unwrap();
-                        return Some((rel_path.to_path_buf(), entry.path().to_path_buf()));
+                        return Some(entry.path().to_path_buf());
                     } else if entry.file_type().is_dir()
                         && let Some(hasher) = self.hasher
                     {
@@ -131,15 +130,14 @@ mod tests {
         let it = FileIterator::new(dir_path.to_path_buf());
         let files: Vec<_> = it.collect();
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].0, PathBuf::from("real_file.txt"));
-        assert_eq!(files[0].1, file_path);
+        assert_eq!(files[0], file_path);
 
         Ok(())
     }
 
     #[test]
     fn single_file_path() -> anyhow::Result<()> {
-        let dir = tempdir()?;
+        let dir = tempfile::tempdir()?;
         let dir_path = dir.path();
         let file1_path = dir_path.join("file1.txt");
         fs::write(&file1_path, "content1")?;
@@ -147,12 +145,11 @@ mod tests {
         fs::write(&file2_path, "content2")?;
 
         // Initialize with path to file1.txt directly
-        // Should only contain file1.txt, and its relative path should be empty
+        // Should only contain file1.txt
         let it = FileIterator::new(file1_path.clone());
         let files: Vec<_> = it.collect();
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].0, PathBuf::from(""));
-        assert_eq!(files[0].1, file1_path);
+        assert_eq!(files[0], file1_path);
 
         Ok(())
     }

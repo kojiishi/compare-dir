@@ -206,7 +206,8 @@ impl FileHasher {
 
     fn check_streaming(&self, tx: mpsc::Sender<CheckEvent>, update: bool) -> anyhow::Result<()> {
         std::thread::scope(|global_scope| {
-            let mut it = FileIterator::new(self.dirs[0].clone());
+            let base_dir = &self.dirs[0];
+            let mut it = FileIterator::new(base_dir.clone());
             it.hasher = Some(self);
             it.exclude = self.exclude.as_ref();
             let it_rx = it.spawn_in_scope(global_scope);
@@ -214,18 +215,19 @@ impl FileHasher {
             let pool = crate::build_thread_pool(self.jobs)?;
             pool.scope(move |scope| -> anyhow::Result<()> {
                 let mut total_files = 0;
-                for (rel_path, abs_path) in it_rx {
+                for path in it_rx {
                     total_files += 1;
                     let tx = tx.clone();
                     scope.spawn(move |_| {
-                        let status = self.check_file(&abs_path, update);
+                        let status = self.check_file(&path, update);
                         let event = match status {
                             Ok(CheckStatus::New) | Ok(CheckStatus::Modified) => {
-                                CheckEvent::Result(rel_path, status.unwrap())
+                                let rel_path = crate::strip_prefix(&path, base_dir).unwrap();
+                                CheckEvent::Result(rel_path.into(), status.unwrap())
                             }
                             Ok(CheckStatus::Unchanged) => CheckEvent::FileDone,
                             Err(e) => {
-                                log::error!("Failed to check file {:?}: {}", rel_path, e);
+                                log::error!("Failed to check file {:?}: {}", path, e);
                                 CheckEvent::Error
                             }
                         };
@@ -396,7 +398,7 @@ impl FileHasher {
 
             let pool = crate::build_thread_pool(self.jobs)?;
             pool.scope(move |scope| -> anyhow::Result<()> {
-                for (_, current_path) in it_rx {
+                for current_path in it_rx {
                     let meta = fs::metadata(&current_path)?;
                     let size = meta.len();
                     let modified = meta.modified()?;

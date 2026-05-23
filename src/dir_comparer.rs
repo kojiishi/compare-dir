@@ -170,33 +170,39 @@ impl DirectoryComparer {
                 tx.send(CompareProgress::StartOfComparison)?;
                 loop {
                     let cmp = match (&cur1, &cur2) {
-                        (Some((rel1, _)), Some((rel2, _))) => rel1.cmp(rel2),
+                        (Some(p1), Some(p2)) => {
+                            let rel1 = crate::strip_prefix(p1, &self.dir1).unwrap();
+                            let rel2 = crate::strip_prefix(p2, &self.dir2).unwrap();
+                            rel1.cmp(rel2)
+                        }
                         (Some(_), None) => Ordering::Less,
                         (None, Some(_)) => Ordering::Greater,
                         (None, None) => break,
                     };
                     match cmp {
                         Ordering::Less => {
-                            let (rel1, _) = cur1.take().unwrap();
+                            let path1 = cur1.take().unwrap();
+                            let rel1 = crate::strip_prefix(&path1, &self.dir1).unwrap();
                             let result =
-                                FileComparisonResult::new(rel1, Classification::OnlyInDir1);
+                                FileComparisonResult::new(rel1.into(), Classification::OnlyInDir1);
                             tx.send(CompareProgress::Result(index, result))?;
                             tx.send(CompareProgress::FileDone)?;
                             index += 1;
                             cur1 = it1_rx.recv().ok();
                         }
                         Ordering::Greater => {
-                            let (rel2, _) = cur2.take().unwrap();
+                            let path2 = cur2.take().unwrap();
+                            let rel2 = crate::strip_prefix(&path2, &self.dir2).unwrap();
                             let result =
-                                FileComparisonResult::new(rel2, Classification::OnlyInDir2);
+                                FileComparisonResult::new(rel2.into(), Classification::OnlyInDir2);
                             tx.send(CompareProgress::Result(index, result))?;
                             tx.send(CompareProgress::FileDone)?;
                             index += 1;
                             cur2 = it2_rx.recv().ok();
                         }
                         Ordering::Equal => {
-                            let (rel_path, path1) = cur1.take().unwrap();
-                            let (_, path2) = cur2.take().unwrap();
+                            let path1 = cur1.take().unwrap();
+                            let path2 = cur2.take().unwrap();
                             let buffer_size = self.buffer_size;
                             let tx_clone = tx.clone();
                             let i = index;
@@ -208,16 +214,17 @@ impl DirectoryComparer {
                                 if let Some((h1, h2)) = hashers_ref {
                                     comparer.hashers = Some((h1, h2));
                                 }
+                                let rel_path = crate::strip_prefix(&path1, &self.dir1).unwrap();
                                 let mut result = FileComparisonResult::new(
-                                    rel_path.clone(),
+                                    rel_path.into(),
                                     Classification::InBoth,
                                 );
                                 let event = match result.update(&comparer, should_compare) {
                                     Ok(_) => CompareProgress::Result(i, result),
                                     Err(error) => {
                                         log::error!(
-                                            "Error during comparison of {:?}: {}",
-                                            rel_path,
+                                            "Error comparing {:?}: {}",
+                                            result.relative_path,
                                             error
                                         );
                                         CompareProgress::Error
@@ -226,7 +233,7 @@ impl DirectoryComparer {
                                 if tx_clone.send(event).is_err()
                                     || tx_clone.send(CompareProgress::FileDone).is_err()
                                 {
-                                    log::error!("Send failed during comparison of {:?}", rel_path);
+                                    log::error!("Send failed");
                                 }
                             });
                             index += 1;
