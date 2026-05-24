@@ -362,7 +362,7 @@ impl CacheState {
         self.entries
             .retain(|_, entry| !entry.is_remove_if_no_access);
         if self.entries.len() != before_count {
-            log::info!("{} hashes are pruned", before_count - self.entries.len());
+            log::info!("Pruned {} hashes", before_count - self.entries.len());
             self.is_dirty = true;
         }
     }

@@ -60,7 +60,7 @@ fn main() -> anyhow::Result<()> {
         progress.is_file_enabled = true;
         args.verbose -= 1;
     }
-    init_logger(args.verbose);
+    init_logger(args.verbose, &progress);
 
     // Ensure paths are absolute. It helps when computing relative paths and
     // walking ancestors.
@@ -113,25 +113,23 @@ fn build_hasher(args: Args, progress: ProgressBuilder) -> anyhow::Result<FileHas
     Ok(hasher)
 }
 
-fn init_logger(verbose: u8) {
+fn init_logger(verbose: u8, progress: &ProgressBuilder) {
     // If `RUST_LOG` is set, initialize the `env_logger` in its default config.
-    if verbose == 0 || env::var("RUST_LOG").is_ok() {
-        env_logger::init();
-        return;
+    let mut builder = env_logger::Builder::from_env(env_logger::Env::default());
+    if verbose != 0 && env::var("RUST_LOG").is_err() {
+        // Setup according to the `verbose` level, in a simpler format.
+        builder
+            .filter_level(match verbose {
+                1 => log::LevelFilter::Info,
+                2 => log::LevelFilter::Debug,
+                _ => log::LevelFilter::Trace,
+            })
+            .format(|buf, record| {
+                let style = buf.default_level_style(record.level());
+                writeln!(buf, "{style}{}{style:#}: {}", record.level(), record.args())
+            });
     }
-
-    // Otherwise setup according to the `verbose` level, in a simpler format.
-    env_logger::Builder::from_env(env_logger::Env::default())
-        .filter_level(match verbose {
-            1 => log::LevelFilter::Info,
-            2 => log::LevelFilter::Debug,
-            _ => log::LevelFilter::Trace,
-        })
-        .format(|buf, record| {
-            let style = buf.default_level_style(record.level());
-            writeln!(buf, "{style}{}{style:#}: {}", record.level(), record.args())
-        })
-        .init();
+    progress.init_logger(builder.build()).unwrap();
 }
 
 fn ensure_absolute_path(path: &mut PathBuf) -> io::Result<()> {
