@@ -50,9 +50,9 @@ enum EntryState {
 pub struct FileHasher {
     dirs: Vec<PathBuf>,
     pub buffer_size: usize,
-    pub(crate) cache: Arc<FileHashCache>,
-    pub(crate) num_hashed: AtomicUsize,
-    pub(crate) num_hash_looked_up: AtomicUsize,
+    cache: Arc<FileHashCache>,
+    num_hashed: AtomicUsize,
+    num_hash_looked_up: AtomicUsize,
     pub exclude: Option<GlobSet>,
     pub progress: Option<Arc<ProgressBuilder>>,
     pub is_yaml_format: bool,
