@@ -14,6 +14,17 @@ use crate::SystemTimeExt;
 pub struct CacheEntry {
     pub hash: Hash,
     pub modified: SystemTime,
+    pub is_remove_if_no_access: bool,
+}
+
+impl CacheEntry {
+    pub fn new(hash: Hash, modified: SystemTime) -> Self {
+        Self {
+            hash,
+            modified,
+            is_remove_if_no_access: false,
+        }
+    }
 }
 
 struct CacheState {
@@ -147,17 +158,22 @@ impl FileHashCache {
     /// Retrieves an entry's hash from the cache, ignoring the modified time.
     pub fn get_by_path(&self, path: &Path) -> Option<Hash> {
         assert!(path.is_relative());
-        let state = self.state.lock().unwrap();
-        state.entries.get(path).map(|entry| entry.hash)
+        let mut state = self.state.lock().unwrap();
+        if let Some(entry) = state.entries.get_mut(path) {
+            entry.is_remove_if_no_access = false;
+            return Some(entry.hash);
+        }
+        None
     }
 
     /// Retrieves an entry's hash from the cache if the modified time matches.
     pub fn get(&self, path: &Path, modified: SystemTime) -> Option<Hash> {
         assert!(path.is_relative());
-        let state = self.state.lock().unwrap();
-        if let Some(entry) = state.entries.get(path)
+        let mut state = self.state.lock().unwrap();
+        if let Some(entry) = state.entries.get_mut(path)
             && entry.modified.eq_nearly(modified)
         {
+            entry.is_remove_if_no_access = false;
             return Some(entry.hash);
         }
         None
@@ -169,7 +185,7 @@ impl FileHashCache {
         let mut state = self.state.lock().unwrap();
         state
             .entries
-            .insert(path.to_path_buf(), CacheEntry { hash, modified });
+            .insert(path.to_path_buf(), CacheEntry::new(hash, modified));
         state.is_dirty = true;
     }
 
@@ -192,6 +208,23 @@ impl FileHashCache {
         state.is_dirty = true;
     }
 
+    /// Sets `should_remove_if_no_access` flag in all entries under the specified path.
+    pub fn set_remove_if_no_access(&self, path: &Path) {
+        assert!(path.is_relative());
+        let mut state = self.state.lock().unwrap();
+        if path.as_os_str().is_empty() {
+            for entry in state.entries.values_mut() {
+                entry.is_remove_if_no_access = true;
+            }
+        } else {
+            for (p, entry) in state.entries.iter_mut() {
+                if p.starts_with(path) {
+                    entry.is_remove_if_no_access = true;
+                }
+            }
+        }
+    }
+
     // For performance, use the larger buffer than the default, which is 8 KiB
     // for `BufWriter::new`.
     const BUFFER_SIZE: usize = FileComparer::DEFAULT_BUFFER_SIZE;
@@ -199,6 +232,7 @@ impl FileHashCache {
     /// Writes the cache out to `<base_dir>/.hashes` if there are dirty changes.
     pub fn save(&self) -> io::Result<()> {
         let mut state = self.state.lock().unwrap();
+        state.remove_if_no_access();
         if state.is_dirty {
             self.save_entries(&mut state)?;
         }
@@ -318,7 +352,19 @@ impl FileHashCache {
         let secs = secs_str.parse::<u64>()?;
         let nanos = nanos_str.parse::<u32>()?;
         let modified = UNIX_EPOCH + Duration::new(secs, nanos);
-        Ok((PathBuf::from(rel_path), CacheEntry { hash, modified }))
+        Ok((PathBuf::from(rel_path), CacheEntry::new(hash, modified)))
+    }
+}
+
+impl CacheState {
+    fn remove_if_no_access(&mut self) {
+        let before_count = self.entries.len();
+        self.entries
+            .retain(|_, entry| !entry.is_remove_if_no_access);
+        if self.entries.len() != before_count {
+            log::info!("{} hashes are pruned", before_count - self.entries.len());
+            self.is_dirty = true;
+        }
     }
 }
 
@@ -542,7 +588,7 @@ mod tests {
         // While Linux supports 1-nanosecond resolution, Windows `FILETIME` is
         // 100-nanosecond intervals.
         let modified = UNIX_EPOCH + Duration::new(12345, 67800);
-        let entry = CacheEntry { hash, modified };
+        let entry = CacheEntry::new(hash, modified);
 
         FileHashCache::write_cache_entry(&mut buf, path, &entry)?;
 
@@ -660,6 +706,52 @@ mod tests {
         // Lookup with time differing by 100ns or more should fail
         assert!(cache.get(&path, time.add(Duration::new(0, 100))).is_none());
         assert!(cache.get(&path, time.sub(Duration::new(0, 100))).is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_if_no_access() -> anyhow::Result<()> {
+        let dir = tempdir()?;
+        let cache = FileHashCache::new(dir.path());
+
+        let path1 = PathBuf::from("keep.txt");
+        let path2 = PathBuf::from("remove.txt");
+        let modified = SystemTime::now();
+        let hash =
+            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
+        cache.insert(&path1, modified, hash);
+        cache.insert(&path2, modified, hash);
+        {
+            // Initially, the flag should be false
+            let state = cache.state.lock().unwrap();
+            assert!(!state.entries.get(&path1).unwrap().is_remove_if_no_access);
+            assert!(!state.entries.get(&path2).unwrap().is_remove_if_no_access);
+        }
+
+        // Set the flag
+        cache.set_remove_if_no_access(Path::new(""));
+        {
+            let state = cache.state.lock().unwrap();
+            assert!(state.entries.get(&path1).unwrap().is_remove_if_no_access);
+            assert!(state.entries.get(&path2).unwrap().is_remove_if_no_access);
+        }
+
+        // Access path1 (get should reset flag)
+        assert!(cache.get(&path1, modified).is_some());
+        {
+            let state = cache.state.lock().unwrap();
+            assert!(!state.entries.get(&path1).unwrap().is_remove_if_no_access);
+            assert!(state.entries.get(&path2).unwrap().is_remove_if_no_access);
+        }
+
+        // Save should remove path2 from the cache but keep path1
+        cache.save()?;
+        {
+            let state = cache.state.lock().unwrap();
+            assert!(state.entries.contains_key(&path1));
+            assert!(!state.entries.contains_key(&path2));
+        }
 
         Ok(())
     }
