@@ -1,4 +1,5 @@
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif_log_bridge::LogWrapper;
 use std::io::{IsTerminal, stderr};
 use std::path::Path;
 use std::time::Duration;
@@ -93,6 +94,13 @@ impl Default for ProgressBuilder {
 impl ProgressBuilder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn init_logger(&self, logger: env_logger::Logger) -> anyhow::Result<()> {
+        let max_level = logger.filter();
+        LogWrapper::new(self.multi.clone(), logger).try_init()?;
+        log::set_max_level(max_level);
+        Ok(())
     }
 
     pub(crate) fn add_spinner(&self) -> Progress {
