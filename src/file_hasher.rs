@@ -202,8 +202,10 @@ impl FileHasher {
     }
 
     fn check_streaming(&self, tx: mpsc::Sender<CheckEvent>, update: bool) -> anyhow::Result<()> {
+        let base_dir = &self.dirs[0];
+        let relative = crate::strip_prefix(base_dir, self.cache.base_dir())?;
+        self.cache.set_remove_if_no_access(relative);
         std::thread::scope(|global_scope| {
-            let base_dir = &self.dirs[0];
             let mut it = FileIterator::new(base_dir.clone());
             it.hasher = Some(self);
             it.exclude = self.exclude.as_ref();
@@ -237,9 +239,7 @@ impl FileHasher {
                 Ok(())
             })
         })?;
-        if update {
-            self.save_cache()?;
-        }
+        self.save_cache()?;
         Ok(())
     }
 
@@ -862,6 +862,47 @@ mod tests {
                 .get(&PathBuf::from("file1.txt"), mtime1_mod2)
                 .is_some()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn check_cleanup_deleted_files() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let dir_path = dir.path().to_path_buf();
+        let file1_path = dir.path().join("file1.txt");
+        let file2_path = dir.path().join("file2.txt");
+        fs::write(&file1_path, "content 1")?;
+        fs::write(&file2_path, "content 2")?;
+        let mtime1 = fs::metadata(&file1_path)?.modified()?;
+        let mtime2 = fs::metadata(&file2_path)?.modified()?;
+
+        let mut hasher = FileHasher::new(&[&dir_path])?;
+        hasher.exclude = Some(default_exclude());
+        let (tx, rx) = mpsc::channel();
+        hasher.check_streaming(tx, true)?;
+        while rx.recv().is_ok() {}
+        hasher.save_cache()?;
+
+        // Verify both are in the cache
+        let cache = FileHashCache::new(&dir_path);
+        assert!(cache.get(&PathBuf::from("file1.txt"), mtime1).is_some());
+        assert!(cache.get(&PathBuf::from("file2.txt"), mtime2).is_some());
+
+        // Now delete file2 from disk
+        fs::remove_file(&file2_path)?;
+
+        // Run check and save again
+        let mut hasher = FileHasher::new(&[&dir_path])?;
+        hasher.exclude = Some(default_exclude());
+        let (tx, rx) = mpsc::channel();
+        hasher.check_streaming(tx, true)?;
+        while rx.recv().is_ok() {}
+        hasher.save_cache()?;
+
+        // Verify file2 is removed from cache, but file1 is still there
+        let cache = FileHashCache::new(&dir_path);
+        assert!(cache.get(&PathBuf::from("file2.txt"), mtime2).is_none());
+        assert!(cache.get(&PathBuf::from("file1.txt"), mtime1).is_some());
         Ok(())
     }
 
