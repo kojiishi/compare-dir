@@ -173,9 +173,6 @@ impl FileHasher {
             }
         });
         progress.finish();
-        if update {
-            self.save_cache()?;
-        }
         self.print_check_summary(&start_time, num_new, num_modified, num_error)?;
         Ok(())
     }
@@ -240,6 +237,9 @@ impl FileHasher {
                 Ok(())
             })
         })?;
+        if update {
+            self.save_cache()?;
+        }
         Ok(())
     }
 
