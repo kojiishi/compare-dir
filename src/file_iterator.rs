@@ -1,13 +1,13 @@
 use crate::FileHashCache;
 use globset::GlobSet;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use walkdir::WalkDir;
 
 pub(crate) struct FileIterator<'a> {
     iter: walkdir::IntoIter,
     dir: PathBuf,
-    pub(crate) cache: Option<&'a FileHashCache>,
+    pub(crate) cache: Option<Arc<FileHashCache>>,
     pub(crate) exclude: Option<&'a GlobSet>,
 }
 
@@ -62,7 +62,7 @@ impl<'a> Iterator for FileIterator<'a> {
                     if entry.file_type().is_file() {
                         return Some(entry.path().to_path_buf());
                     } else if entry.file_type().is_dir()
-                        && let Some(cache) = self.cache
+                        && let Some(cache) = &self.cache
                     {
                         // If there's a hash cache in the directory, merge it.
                         // Except the root directory, `WalkDir` emits it first.
