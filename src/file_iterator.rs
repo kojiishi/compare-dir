@@ -1,23 +1,21 @@
 use crate::FileHashCache;
 use globset::GlobSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 use walkdir::WalkDir;
 
 pub(crate) struct FileIterator<'a> {
     iter: walkdir::IntoIter,
-    dir: PathBuf,
     pub(crate) cache: Option<Arc<FileHashCache>>,
     pub(crate) exclude: Option<&'a GlobSet>,
 }
 
 impl<'a> FileIterator<'a> {
-    pub(crate) fn new(dir: PathBuf) -> Self {
+    pub(crate) fn new(dir: &Path) -> Self {
         log::info!("Scanning directory: {:?}", dir);
-        let iter = WalkDir::new(&dir).sort_by_file_name().into_iter();
+        let iter = WalkDir::new(dir).sort_by_file_name().into_iter();
         FileIterator {
             iter,
-            dir,
             cache: None,
             exclude: None,
         }
@@ -65,9 +63,9 @@ impl<'a> Iterator for FileIterator<'a> {
                         && let Some(cache) = &self.cache
                     {
                         // If there's a hash cache in the directory, merge it.
-                        // Except the root directory, `WalkDir` emits it first.
+                        // Note that `WalkDir` emits the root directory first.
                         let dir = entry.path();
-                        if dir != self.dir {
+                        if dir != cache.base_dir() {
                             let cache_path = dir.join(FileHashCache::FILE_NAME);
                             if cache_path.is_file() {
                                 let child_cache = FileHashCache::new(dir);
@@ -119,7 +117,7 @@ mod tests {
         std::os::windows::fs::symlink_dir(&target_dir, &dir_symlink_path)?;
 
         // Should only contain the real file, not the symlinks (file or directory)
-        let it = FileIterator::new(dir_path.to_path_buf());
+        let it = FileIterator::new(dir_path);
         let files: Vec<_> = it.collect();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0], file_path);
@@ -138,7 +136,7 @@ mod tests {
 
         // Initialize with path to file1.txt directly
         // Should only contain file1.txt
-        let it = FileIterator::new(file1_path.clone());
+        let it = FileIterator::new(&file1_path);
         let files: Vec<_> = it.collect();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0], file1_path);

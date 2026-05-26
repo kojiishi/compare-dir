@@ -145,8 +145,8 @@ impl DirectoryComparer {
     }
 
     fn compare_streaming(&self, tx: mpsc::Sender<CompareProgress>) -> anyhow::Result<()> {
-        let mut it1 = FileIterator::new(self.dir1.clone());
-        let mut it2 = FileIterator::new(self.dir2.clone());
+        let mut it1 = FileIterator::new(&self.dir1);
+        let mut it2 = FileIterator::new(&self.dir2);
         it1.exclude = self.exclude.as_ref();
         it2.exclude = self.exclude.as_ref();
         let hashers = self.get_hashers(&self.dir1, &self.dir2)?;

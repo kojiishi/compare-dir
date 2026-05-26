@@ -206,7 +206,7 @@ impl FileHasher {
         let relative = crate::strip_prefix(base_dir, self.cache.base_dir())?;
         self.cache.set_remove_if_no_access(relative);
         std::thread::scope(|global_scope| {
-            let mut it = FileIterator::new(base_dir.clone());
+            let mut it = FileIterator::new(base_dir);
             it.cache = Some(Arc::clone(&self.cache));
             it.exclude = self.exclude.as_ref();
             let it_rx = it.spawn_in_scope(global_scope);
@@ -389,7 +389,7 @@ impl FileHasher {
             let (it_tx, it_rx) = mpsc::channel();
             for dir in &self.dirs {
                 let it_tx = it_tx.clone();
-                let mut it = FileIterator::new(dir.clone());
+                let mut it = FileIterator::new(dir);
                 it.cache = Some(Arc::clone(&self.cache));
                 it.exclude = self.exclude.as_ref();
                 global_scope.spawn(move || it.send_to(it_tx));
