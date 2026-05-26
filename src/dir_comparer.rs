@@ -151,8 +151,8 @@ impl DirectoryComparer {
         it2.exclude = self.exclude.as_ref();
         let hashers = self.get_hashers(&self.dir1, &self.dir2)?;
         if let Some((h1, h2)) = &hashers {
-            it1.hasher = Some(h1);
-            it2.hasher = Some(h2);
+            it1.cache = Some(h1.cache());
+            it2.cache = Some(h2.cache());
             if self.comparison_method == FileComparisonMethod::Rehash {
                 h1.clear_cache()?;
                 h2.clear_cache()?;

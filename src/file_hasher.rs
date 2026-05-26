@@ -100,9 +100,9 @@ impl FileHasher {
         Ok(self.cache.save()?)
     }
 
-    /// Merges another cache into this hasher's cache.
-    pub(crate) fn merge_cache(&self, other_cache: &FileHashCache) {
-        self.cache.merge(other_cache);
+    /// Gets the hash cache.
+    pub(crate) fn cache(&self) -> &FileHashCache {
+        &self.cache
     }
 
     /// Clears the loaded hashes in the cache.
@@ -207,7 +207,7 @@ impl FileHasher {
         self.cache.set_remove_if_no_access(relative);
         std::thread::scope(|global_scope| {
             let mut it = FileIterator::new(base_dir.clone());
-            it.hasher = Some(self);
+            it.cache = Some(&self.cache);
             it.exclude = self.exclude.as_ref();
             let it_rx = it.spawn_in_scope(global_scope);
             tx.send(CheckEvent::StartChecking)?;
@@ -390,7 +390,7 @@ impl FileHasher {
             for dir in &self.dirs {
                 let it_tx = it_tx.clone();
                 let mut it = FileIterator::new(dir.clone());
-                it.hasher = Some(self);
+                it.cache = Some(&self.cache);
                 it.exclude = self.exclude.as_ref();
                 global_scope.spawn(move || it.send_to(it_tx));
             }
