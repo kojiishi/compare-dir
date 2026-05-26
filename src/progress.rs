@@ -35,10 +35,6 @@ impl Progress {
         }
     }
 
-    pub fn length(&self) -> Option<u64> {
-        self.inner.as_ref().and_then(|inner| inner.length())
-    }
-
     pub fn set_length(&self, len: u64) {
         if let Some(inner) = &self.inner {
             if inner.length().is_none() {
