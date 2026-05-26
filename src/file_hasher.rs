@@ -401,10 +401,10 @@ impl FileHasher {
                 for current_path in it_rx {
                     let meta = fs::metadata(&current_path)?;
                     let size = meta.len();
+                    if size == 0 {
+                        continue;
+                    }
                     let modified = meta.modified()?;
-
-                    // Small optimization: If file size is 0, it's not really worth treating
-                    // as wasted space duplicates in the same way, but keeping it unified for now.
                     match by_size.entry(size) {
                         std::collections::hash_map::Entry::Occupied(mut occ) => match occ.get_mut()
                         {
