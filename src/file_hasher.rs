@@ -18,10 +18,10 @@ use std::{
 };
 
 #[derive(Debug, Clone)]
-enum HashProgress {
-    StartDiscovering,
-    TotalFiles(usize),
-    Result(PathBuf, u64, blake3::Hash, bool),
+enum DupEvent {
+    StartHashing,
+    NumFiles(usize),
+    Result(PathBuf, u64, blake3::Hash),
     Error,
 }
 
@@ -41,7 +41,7 @@ enum CheckEvent {
     Error,
 }
 
-enum EntryState {
+enum DupState {
     Single(PathBuf, time::SystemTime),
     Hashing,
 }
@@ -322,7 +322,6 @@ impl FileHasher {
 
         let (tx, rx) = mpsc::channel();
         let mut by_hash: HashMap<blake3::Hash, DuplicatedFiles> = HashMap::new();
-        let mut num_cache_hits = 0;
         std::thread::scope(|scope| {
             scope.spawn(|| {
                 if let Err(e) = self.find_duplicates_streaming(tx) {
@@ -332,28 +331,9 @@ impl FileHasher {
 
             while let Ok(event) = rx.recv() {
                 match event {
-                    HashProgress::StartDiscovering => {
-                        progress.set_message("Hashing files...");
-                    }
-                    HashProgress::TotalFiles(total) => {
-                        progress.set_length(total as u64);
-                        if num_cache_hits > 0 {
-                            progress.set_message(format!(" ({} cache hits)", num_cache_hits));
-                        }
-                    }
-                    HashProgress::Result(path, size, hash, is_cache_hit) => {
-                        if is_cache_hit {
-                            num_cache_hits += 1;
-                            if progress.length().is_none() {
-                                progress.set_message(format!(
-                                    "Hashing files... ({} cache hits)",
-                                    num_cache_hits
-                                ));
-                            } else {
-                                progress.set_message(format!(" ({} cache hits)", num_cache_hits));
-                            }
-                        }
-
+                    DupEvent::StartHashing => progress.set_message("Hashing files..."),
+                    DupEvent::NumFiles(num) => progress.set_length(num as u64),
+                    DupEvent::Result(path, size, hash) => {
                         progress.inc(1);
                         let entry = by_hash.entry(hash).or_insert_with(|| DuplicatedFiles {
                             paths: Vec::new(),
@@ -363,9 +343,7 @@ impl FileHasher {
                         assert_eq!(entry.size, size, "Hash collision: sizes do not match");
                         entry.paths.push(path);
                     }
-                    HashProgress::Error => {
-                        progress.inc(1);
-                    }
+                    DupEvent::Error => progress.inc(1),
                 }
             }
         });
@@ -381,10 +359,7 @@ impl FileHasher {
         Ok(duplicates)
     }
 
-    fn find_duplicates_streaming(&self, tx: mpsc::Sender<HashProgress>) -> anyhow::Result<()> {
-        tx.send(HashProgress::StartDiscovering)?;
-        let mut by_size: HashMap<u64, EntryState> = HashMap::new();
-        let mut total_hashed = 0;
+    fn find_duplicates_streaming(&self, tx: mpsc::Sender<DupEvent>) -> anyhow::Result<()> {
         std::thread::scope(|global_scope| {
             let (it_tx, it_rx) = mpsc::channel();
             for dir in &self.dirs {
@@ -398,6 +373,9 @@ impl FileHasher {
 
             let pool = crate::build_thread_pool(self.jobs)?;
             pool.scope(move |scope| -> anyhow::Result<()> {
+                let mut by_size: HashMap<u64, DupState> = HashMap::new();
+                let mut num_hashed = 0;
+                tx.send(DupEvent::StartHashing)?;
                 for current_path in it_rx {
                     let meta = fs::metadata(&current_path)?;
                     let size = meta.len();
@@ -408,35 +386,32 @@ impl FileHasher {
                     match by_size.entry(size) {
                         std::collections::hash_map::Entry::Occupied(mut occ) => match occ.get_mut()
                         {
-                            EntryState::Single(first_path, first_modified) => {
+                            DupState::Single(first_path, first_modified) => {
                                 // We found a second file of identical size.
                                 // Time to start hashing both the *original* matching file and the *new* one!
                                 self.spawn_hash_task(first_path, size, *first_modified, scope, &tx);
                                 self.spawn_hash_task(&current_path, size, modified, scope, &tx);
 
                                 // Modify the state to indicate we are now fully hashing this size bucket.
-                                *occ.get_mut() = EntryState::Hashing;
-                                total_hashed += 2;
+                                *occ.get_mut() = DupState::Hashing;
+                                num_hashed += 2;
                             }
-                            EntryState::Hashing => {
+                            DupState::Hashing => {
                                 // File size bucket already hashing; just dynamically spawn the new file immediately.
                                 self.spawn_hash_task(&current_path, size, modified, scope, &tx);
-                                total_hashed += 1;
+                                num_hashed += 1;
                             }
                         },
                         std::collections::hash_map::Entry::Vacant(vac) => {
-                            vac.insert(EntryState::Single(current_path, modified));
+                            vac.insert(DupState::Single(current_path, modified));
                         }
                     }
                 }
-                tx.send(HashProgress::TotalFiles(total_hashed))?;
+                tx.send(DupEvent::NumFiles(num_hashed))?;
                 Ok(())
-            })
-        })?;
-
-        // The scope waits for all spawned tasks to complete.
-        // Channel `tx` gets naturally closed when it drops at the end of this function.
-        self.save_cache()
+            })?;
+            self.save_cache()
+        })
     }
 
     fn spawn_hash_task<'scope>(
@@ -445,13 +420,13 @@ impl FileHasher {
         size: u64,
         modified: time::SystemTime,
         scope: &rayon::Scope<'scope>,
-        tx: &mpsc::Sender<HashProgress>,
+        tx: &mpsc::Sender<DupEvent>,
     ) {
         let (hash, relative) = self
             .get_hash_from_cache(path, modified)
             .expect("path should be in cache base_dir");
         if let Some(hash) = hash {
-            let _ = tx.send(HashProgress::Result(path.to_path_buf(), size, hash, true));
+            let _ = tx.send(DupEvent::Result(path.to_path_buf(), size, hash));
             return;
         }
 
@@ -461,10 +436,10 @@ impl FileHasher {
         scope.spawn(move |_| {
             if let Ok(hash) = self.compute_hash(&path) {
                 self.cache.insert(&relative, modified, hash);
-                let _ = tx.send(HashProgress::Result(path, size, hash, false));
+                let _ = tx.send(DupEvent::Result(path, size, hash));
             } else {
                 log::error!("Failed to hash file: {:?}", path);
-                let _ = tx.send(HashProgress::Error);
+                let _ = tx.send(DupEvent::Error);
             }
         });
     }
