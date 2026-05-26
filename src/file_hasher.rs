@@ -392,7 +392,7 @@ impl FileHasher {
                 let mut it = FileIterator::new(dir.clone());
                 it.hasher = Some(self);
                 it.exclude = self.exclude.as_ref();
-                it.spawn_in_scope_with_sender(global_scope, it_tx);
+                global_scope.spawn(move || it.send_to(it_tx));
             }
             drop(it_tx);
 

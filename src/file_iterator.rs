@@ -23,21 +23,13 @@ impl<'a> FileIterator<'a> {
         }
     }
 
-    pub(crate) fn spawn_in_scope_with_sender<'scope>(
-        self,
-        scope: &'scope std::thread::Scope<'scope, '_>,
-        tx: mpsc::Sender<PathBuf>,
-    ) where
-        'a: 'scope,
-    {
-        scope.spawn(move || {
-            for item in self {
-                if tx.send(item).is_err() {
-                    log::error!("Send failed");
-                    break;
-                }
+    pub(crate) fn send_to(self, tx: mpsc::Sender<PathBuf>) {
+        for item in self {
+            if tx.send(item).is_err() {
+                log::error!("Send failed");
+                break;
             }
-        });
+        }
     }
 
     pub(crate) fn spawn_in_scope<'scope>(
@@ -48,7 +40,7 @@ impl<'a> FileIterator<'a> {
         'a: 'scope,
     {
         let (tx, rx) = mpsc::channel();
-        self.spawn_in_scope_with_sender(scope, tx);
+        scope.spawn(move || self.send_to(tx));
         rx
     }
 }
