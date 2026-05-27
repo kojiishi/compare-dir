@@ -4,6 +4,7 @@ use crate::{
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
+use rayon::prelude::*;
 use std::{
     collections::HashMap,
     fs,
@@ -16,6 +17,8 @@ use std::{
     },
     time,
 };
+
+type FileItem = (PathBuf, usize);
 
 #[derive(Debug, Clone)]
 enum DupEvent {
@@ -42,7 +45,7 @@ enum CheckEvent {
 }
 
 enum DupState {
-    Single(PathBuf, time::SystemTime),
+    Single(PathBuf, time::SystemTime, usize),
     Hashing,
 }
 
@@ -387,39 +390,31 @@ impl FileHasher {
     }
 
     fn find_duplicates_streaming(&self, tx: mpsc::Sender<DupEvent>) -> anyhow::Result<()> {
-        let cache = self.new_cache()?;
-        let cache_clone = Arc::clone(&cache);
         std::thread::scope(|global_scope| {
-            let (it_tx, it_rx) = mpsc::channel();
-            for dir in &self.dirs {
-                let it_tx = it_tx.clone();
-                let mut it = FileIterator::new(dir);
-                it.cache = Some(Arc::clone(&cache));
-                it.exclude = self.exclude.as_ref();
-                global_scope.spawn(move || it.send_to(it_tx));
-            }
-            drop(it_tx);
-
+            let (it_rx, caches) = self.stream_file_items(global_scope)?;
+            let caches = &caches;
             let pool = crate::build_thread_pool(self.jobs)?;
             pool.scope(move |scope| -> anyhow::Result<()> {
                 let mut by_size: HashMap<u64, DupState> = HashMap::new();
                 let mut num_hashed = 0;
                 tx.send(DupEvent::StartHashing)?;
-                for path in it_rx {
+                for (path, dir_index) in it_rx {
                     let meta = fs::metadata(&path)?;
                     let size = meta.len();
                     if size == 0 {
                         continue;
                     }
                     let modified = meta.modified()?;
+                    let cache = &caches[dir_index];
                     match by_size.entry(size) {
                         std::collections::hash_map::Entry::Occupied(mut occ) => match occ.get_mut()
                         {
-                            DupState::Single(path0, modified0) => {
+                            DupState::Single(path0, modified0, dir_index0) => {
                                 // We found a second file of identical size.
                                 // Time to start hashing both the *original* matching file and the *new* one!
-                                self.send_hash(path0, size, *modified0, &cache, &tx, scope);
-                                self.send_hash(&path, size, modified, &cache, &tx, scope);
+                                let cache0 = &caches[*dir_index0];
+                                self.send_hash(path0, size, *modified0, cache0, &tx, scope);
+                                self.send_hash(&path, size, modified, cache, &tx, scope);
 
                                 // Modify the state to indicate we are now fully hashing this size bucket.
                                 *occ.get_mut() = DupState::Hashing;
@@ -427,21 +422,40 @@ impl FileHasher {
                             }
                             DupState::Hashing => {
                                 // File size bucket already hashing; just dynamically spawn the new file immediately.
-                                self.send_hash(&path, size, modified, &cache, &tx, scope);
+                                self.send_hash(&path, size, modified, cache, &tx, scope);
                                 num_hashed += 1;
                             }
                         },
                         std::collections::hash_map::Entry::Vacant(vac) => {
-                            vac.insert(DupState::Single(path, modified));
+                            vac.insert(DupState::Single(path, modified, dir_index));
                         }
                     }
                 }
                 tx.send(DupEvent::NumFiles(num_hashed))?;
                 Ok(())
-            })
+            })?;
+            pool.install(|| caches.into_par_iter().try_for_each(|cache| cache.save()))?;
+            Ok::<(), anyhow::Error>(())
         })?;
-        cache_clone.save()?;
         Ok(())
+    }
+
+    fn stream_file_items<'scope, 'env>(
+        &'env self,
+        scope: &'scope std::thread::Scope<'scope, 'env>,
+    ) -> anyhow::Result<(mpsc::Receiver<FileItem>, Vec<Arc<FileHashCache>>)> {
+        let (it_tx, it_rx) = mpsc::channel();
+        let mut caches = Vec::with_capacity(self.dirs.len());
+        for (dir_index, dir) in self.dirs.iter().enumerate() {
+            let mut it = FileIterator::new(dir);
+            let cache = FileHashCache::find_or_new(dir);
+            it.cache = Some(Arc::clone(&cache));
+            it.exclude = self.exclude.as_ref();
+            let it_tx = it_tx.clone();
+            scope.spawn(move || it.send_to_as(it_tx, |path| (path, dir_index)));
+            caches.push(cache);
+        }
+        Ok((it_rx, caches))
     }
 
     fn send_hash<'scope>(
