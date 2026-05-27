@@ -50,7 +50,7 @@ enum DupState {
 pub struct FileHasher {
     dirs: Vec<PathBuf>,
     pub buffer_size: usize,
-    cache: Arc<FileHashCache>,
+    cache: Option<Arc<FileHashCache>>,
     num_hashed: AtomicUsize,
     num_hash_looked_up: AtomicUsize,
     pub exclude: Option<GlobSet>,
@@ -67,12 +67,10 @@ impl FileHasher {
         if dirs.is_empty() {
             anyhow::bail!("At least one directory must be specified.");
         }
-        let common_ancestor = crate::common_ancestor(dirs)
-            .ok_or_else(|| anyhow::anyhow!("No common ancestor found"))?;
         Ok(Self {
             dirs: dirs.iter().map(|p| p.as_ref().to_path_buf()).collect(),
             buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
-            cache: FileHashCache::find_or_new(&common_ancestor),
+            cache: None,
             num_hashed: AtomicUsize::new(0),
             num_hash_looked_up: AtomicUsize::new(0),
             exclude: None,
@@ -82,15 +80,31 @@ impl FileHasher {
         })
     }
 
+    pub(crate) fn new_with_cache<P: AsRef<Path>>(dirs: &[P]) -> anyhow::Result<Self> {
+        let mut hasher = Self::new(dirs)?;
+        hasher.cache = Some(hasher.new_cache()?);
+        Ok(hasher)
+    }
+
+    fn new_cache(&self) -> anyhow::Result<Arc<FileHashCache>> {
+        let common_ancestor = crate::common_ancestor(&self.dirs)
+            .ok_or_else(|| anyhow::anyhow!("No common ancestor found"))?;
+        Ok(FileHashCache::find_or_new(&common_ancestor))
+    }
+
     /// Gets the hash cache.
-    pub(crate) fn cache(&self) -> Arc<FileHashCache> {
-        Arc::clone(&self.cache)
+    pub(crate) fn cache(&mut self) -> anyhow::Result<Arc<FileHashCache>> {
+        if self.cache.is_none() {
+            self.cache = Some(self.new_cache()?);
+        }
+        Ok(Arc::clone(self.cache.as_ref().unwrap()))
     }
 
     /// Remove a cache entry if it exists.
-    pub fn remove_cache_entry(&self, path: &Path) -> anyhow::Result<()> {
-        let relative = crate::strip_prefix(path, self.cache.base_dir())?;
-        self.cache.remove(relative);
+    pub(crate) fn remove_cache_entry(&mut self, path: &Path) -> anyhow::Result<()> {
+        let cache = self.cache()?;
+        let relative = crate::strip_prefix(path, cache.base_dir())?;
+        cache.remove(relative);
         Ok(())
     }
 
@@ -102,14 +116,18 @@ impl FileHasher {
             self.num_hashed.load(Ordering::Relaxed),
             self.num_hash_looked_up.load(Ordering::Relaxed)
         );
-        Ok(self.cache.save()?)
+        if let Some(cache) = &self.cache {
+            cache.save()?;
+        }
+        Ok(())
     }
 
     /// Clears the loaded hashes in the cache.
-    pub fn clear_cache(&self) -> anyhow::Result<()> {
+    pub(crate) fn clear_cache(&mut self) -> anyhow::Result<()> {
+        let cache = self.cache()?;
         for dir in &self.dirs {
-            let relative = crate::strip_prefix(dir, self.cache.base_dir())?;
-            self.cache.clear(relative);
+            let relative = crate::strip_prefix(dir, cache.base_dir())?;
+            cache.clear(relative);
         }
         Ok(())
     }
@@ -202,12 +220,15 @@ impl FileHasher {
     }
 
     fn check_streaming(&self, tx: mpsc::Sender<CheckEvent>, update: bool) -> anyhow::Result<()> {
+        assert_eq!(self.dirs.len(), 1);
+        let cache = self.new_cache()?;
         let base_dir = &self.dirs[0];
-        let relative = crate::strip_prefix(base_dir, self.cache.base_dir())?;
-        self.cache.set_remove_if_no_access(relative);
+        let relative = crate::strip_prefix(base_dir, cache.base_dir())?;
+        cache.set_remove_if_no_access(relative);
+        let cache_clone = Arc::clone(&cache);
         std::thread::scope(|global_scope| {
             let mut it = FileIterator::new(base_dir);
-            it.cache = Some(Arc::clone(&self.cache));
+            it.cache = Some(Arc::clone(&cache));
             it.exclude = self.exclude.as_ref();
             let it_rx = it.spawn_in_scope(global_scope);
             tx.send(CheckEvent::StartChecking)?;
@@ -217,8 +238,9 @@ impl FileHasher {
                 for path in it_rx {
                     total_files += 1;
                     let tx = tx.clone();
+                    let cache = Arc::clone(&cache);
                     scope.spawn(move |_| {
-                        let status = self.check_file(&path, update);
+                        let status = self.check_file(&path, &cache, update);
                         let event = match status {
                             Ok(CheckStatus::New) | Ok(CheckStatus::Modified) => {
                                 let rel_path = crate::strip_prefix(&path, base_dir).unwrap();
@@ -239,15 +261,20 @@ impl FileHasher {
                 Ok(())
             })
         })?;
-        self.save_cache()?;
+        cache_clone.save()?;
         Ok(())
     }
 
-    fn check_file(&self, abs_path: &Path, update: bool) -> anyhow::Result<CheckStatus> {
+    fn check_file(
+        &self,
+        abs_path: &Path,
+        cache: &FileHashCache,
+        update: bool,
+    ) -> anyhow::Result<CheckStatus> {
         assert!(abs_path.is_absolute());
         let computed_hash = self.compute_hash(abs_path)?;
-        let rel_path = crate::strip_prefix(abs_path, self.cache.base_dir())?;
-        let cached_hash = self.cache.get_by_path(rel_path);
+        let rel_path = crate::strip_prefix(abs_path, cache.base_dir())?;
+        let cached_hash = cache.get_by_path(rel_path);
         let status = match cached_hash {
             None => CheckStatus::New,
             Some(cached) => {
@@ -262,11 +289,11 @@ impl FileHasher {
             let modified = fs::metadata(abs_path)?.modified()?;
             match status {
                 CheckStatus::New | CheckStatus::Modified => {
-                    self.cache.insert(rel_path, modified, computed_hash);
+                    cache.insert(rel_path, modified, computed_hash);
                 }
                 CheckStatus::Unchanged => {
-                    if self.cache.get(rel_path, modified).is_none() {
-                        self.cache.insert(rel_path, modified, computed_hash);
+                    if cache.get(rel_path, modified).is_none() {
+                        cache.insert(rel_path, modified, computed_hash);
                     }
                 }
             }
@@ -360,12 +387,14 @@ impl FileHasher {
     }
 
     fn find_duplicates_streaming(&self, tx: mpsc::Sender<DupEvent>) -> anyhow::Result<()> {
+        let cache = self.new_cache()?;
+        let cache_clone = Arc::clone(&cache);
         std::thread::scope(|global_scope| {
             let (it_tx, it_rx) = mpsc::channel();
             for dir in &self.dirs {
                 let it_tx = it_tx.clone();
                 let mut it = FileIterator::new(dir);
-                it.cache = Some(Arc::clone(&self.cache));
+                it.cache = Some(Arc::clone(&cache));
                 it.exclude = self.exclude.as_ref();
                 global_scope.spawn(move || it.send_to(it_tx));
             }
@@ -376,8 +405,8 @@ impl FileHasher {
                 let mut by_size: HashMap<u64, DupState> = HashMap::new();
                 let mut num_hashed = 0;
                 tx.send(DupEvent::StartHashing)?;
-                for current_path in it_rx {
-                    let meta = fs::metadata(&current_path)?;
+                for path in it_rx {
+                    let meta = fs::metadata(&path)?;
                     let size = meta.len();
                     if size == 0 {
                         continue;
@@ -386,11 +415,11 @@ impl FileHasher {
                     match by_size.entry(size) {
                         std::collections::hash_map::Entry::Occupied(mut occ) => match occ.get_mut()
                         {
-                            DupState::Single(first_path, first_modified) => {
+                            DupState::Single(path0, modified0) => {
                                 // We found a second file of identical size.
                                 // Time to start hashing both the *original* matching file and the *new* one!
-                                self.spawn_hash_task(first_path, size, *first_modified, scope, &tx);
-                                self.spawn_hash_task(&current_path, size, modified, scope, &tx);
+                                self.send_hash(path0, size, *modified0, &cache, &tx, scope);
+                                self.send_hash(&path, size, modified, &cache, &tx, scope);
 
                                 // Modify the state to indicate we are now fully hashing this size bucket.
                                 *occ.get_mut() = DupState::Hashing;
@@ -398,32 +427,34 @@ impl FileHasher {
                             }
                             DupState::Hashing => {
                                 // File size bucket already hashing; just dynamically spawn the new file immediately.
-                                self.spawn_hash_task(&current_path, size, modified, scope, &tx);
+                                self.send_hash(&path, size, modified, &cache, &tx, scope);
                                 num_hashed += 1;
                             }
                         },
                         std::collections::hash_map::Entry::Vacant(vac) => {
-                            vac.insert(DupState::Single(current_path, modified));
+                            vac.insert(DupState::Single(path, modified));
                         }
                     }
                 }
                 tx.send(DupEvent::NumFiles(num_hashed))?;
                 Ok(())
-            })?;
-            self.save_cache()
-        })
+            })
+        })?;
+        cache_clone.save()?;
+        Ok(())
     }
 
-    fn spawn_hash_task<'scope>(
+    fn send_hash<'scope>(
         &'scope self,
         path: &Path,
         size: u64,
         modified: time::SystemTime,
-        scope: &rayon::Scope<'scope>,
+        cache: &Arc<FileHashCache>,
         tx: &mpsc::Sender<DupEvent>,
+        scope: &rayon::Scope<'scope>,
     ) {
         let (hash, relative) = self
-            .get_hash_from_cache(path, modified)
+            .get_hash_from_cache(path, modified, cache)
             .expect("path should be in cache base_dir");
         if let Some(hash) = hash {
             let _ = tx.send(DupEvent::Result(path.to_path_buf(), size, hash));
@@ -433,9 +464,10 @@ impl FileHasher {
         let path = path.to_path_buf();
         let relative = relative.to_path_buf();
         let tx = tx.clone();
+        let cache = Arc::clone(cache);
         scope.spawn(move |_| {
             if let Ok(hash) = self.compute_hash(&path) {
-                self.cache.insert(&relative, modified, hash);
+                cache.insert(&relative, modified, hash);
                 let _ = tx.send(DupEvent::Result(path, size, hash));
             } else {
                 log::error!("Failed to hash file: {:?}", path);
@@ -446,15 +478,16 @@ impl FileHasher {
 
     /// Gets the hash of a file, using the cache if available.
     pub fn get_hash(&self, path: &Path) -> io::Result<blake3::Hash> {
+        let cache = self.cache.as_ref().expect("cache should be initialized");
         let meta = fs::metadata(path)?;
         let modified = meta.modified()?;
-        let (hash, relative) = self.get_hash_from_cache(path, modified)?;
+        let (hash, relative) = self.get_hash_from_cache(path, modified, cache)?;
         if let Some(hash) = hash {
             return Ok(hash);
         }
 
         let hash = self.compute_hash(path)?;
-        self.cache.insert(relative, modified, hash);
+        cache.insert(relative, modified, hash);
         Ok(hash)
     }
 
@@ -462,10 +495,11 @@ impl FileHasher {
         &self,
         path: &'a Path,
         modified: time::SystemTime,
+        cache: &FileHashCache,
     ) -> io::Result<(Option<blake3::Hash>, &'a Path)> {
-        let relative = crate::strip_prefix(path, self.cache.base_dir())
+        let relative = crate::strip_prefix(path, cache.base_dir())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        if let Some(hash) = self.cache.get(relative, modified) {
+        if let Some(hash) = cache.get(relative, modified) {
             self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
             return Ok((Some(hash), relative));
         }
@@ -718,11 +752,11 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let dir_path = dir.path().to_path_buf();
         let file1_path = dir.path().join("file1.txt");
-        fs::write(&file1_path, "content 1")?;
         let file2_path = dir.path().join("file2.txt");
+        fs::write(&file1_path, "content 1")?;
         fs::write(&file2_path, "content 2")?;
 
-        let mut hasher = FileHasher::new(&[&dir_path])?;
+        let mut hasher = FileHasher::new_with_cache(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let _hash1 = hasher.get_hash(&file1_path)?;
         let _hash2 = hasher.get_hash(&file2_path)?;
