@@ -245,8 +245,8 @@ mod tests {
         assert_eq!(comparer.compare_contents()?, expected);
 
         // With hashers
-        let hasher1 = FileHasher::new(&[dir1.path()])?;
-        let hasher2 = FileHasher::new(&[dir2.path()])?;
+        let hasher1 = FileHasher::new_with_cache(&[dir1.path()])?;
+        let hasher2 = FileHasher::new_with_cache(&[dir2.path()])?;
         comparer.hashers = Some((&hasher1, &hasher2));
         assert_eq!(comparer.compare_contents()?, expected);
 

@@ -149,10 +149,10 @@ impl DirectoryComparer {
         let mut it2 = FileIterator::new(&self.dir2);
         it1.exclude = self.exclude.as_ref();
         it2.exclude = self.exclude.as_ref();
-        let hashers = self.get_hashers(&self.dir1, &self.dir2)?;
-        if let Some((h1, h2)) = &hashers {
-            it1.cache = Some(h1.cache());
-            it2.cache = Some(h2.cache());
+        let mut hashers = self.get_hashers(&self.dir1, &self.dir2)?;
+        if let Some((h1, h2)) = &mut hashers {
+            it1.cache = Some(h1.cache()?);
+            it2.cache = Some(h2.cache()?);
             if self.comparison_method == FileComparisonMethod::Rehash {
                 h1.clear_cache()?;
                 h2.clear_cache()?;
@@ -259,8 +259,10 @@ impl DirectoryComparer {
         if self.comparison_method == FileComparisonMethod::Hash
             || self.comparison_method == FileComparisonMethod::Rehash
         {
-            let (h1_res, h2_res) =
-                rayon::join(|| FileHasher::new(&[dir1]), || FileHasher::new(&[dir2]));
+            let (h1_res, h2_res) = rayon::join(
+                || FileHasher::new_with_cache(&[dir1]),
+                || FileHasher::new_with_cache(&[dir2]),
+            );
             let mut h1 = h1_res?;
             let mut h2 = h2_res?;
             h1.buffer_size = self.buffer_size;
@@ -296,8 +298,8 @@ impl DirectoryComparer {
 
         let mut comparer = FileComparer::new(file1, &file2);
         comparer.buffer_size = self.buffer_size;
-        let hashers = self.get_hashers(dir1, dir2)?;
-        if let Some((h1, h2)) = &hashers {
+        let mut hashers = self.get_hashers(dir1, dir2)?;
+        if let Some((h1, h2)) = &mut hashers {
             if self.comparison_method == FileComparisonMethod::Rehash {
                 h1.remove_cache_entry(file1)?;
                 h2.remove_cache_entry(&file2)?;
