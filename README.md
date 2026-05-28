@@ -14,7 +14,7 @@
 A command line tool to
 [compare two directories and show the differences][compare directories].
 It can also [find changed, corrupted][find changed files],
-and [duplicated files][find duplicates].
+and [duplicated files][find duplicated files].
 
 ## Installation
 
@@ -39,7 +39,7 @@ See [Releases] for the change history.
 
 * [Compare Directories]
 * [Find Changed or Corrupted Files][find changed files]
-* [Find Duplicates]
+* [Find Duplicated Files]
 
 ### Compare Directories
 [compare directories]: #compare-directories
