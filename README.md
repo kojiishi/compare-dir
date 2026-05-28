@@ -170,6 +170,12 @@ with the `-c dup` option.
 compare-dir -c dup <dir>
 ```
 
+Finding duplicated files from multiple directories is also supported.
+```shell-session
+compare-dir -c dup <dir1> <dir2> <dir3>
+```
+
+
 The `--symbol` (or `-s` for short) prints the results in the YAML format.
 Please use other tools such as [yq] if you need to
 convert the YAML results to JSON or other formats.

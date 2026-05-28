@@ -22,8 +22,12 @@ impl<'a> FileIterator<'a> {
     }
 
     pub(crate) fn send_to(self, tx: mpsc::Sender<PathBuf>) {
-        for item in self {
-            if tx.send(item).is_err() {
+        self.send_to_as(tx, |path| path);
+    }
+
+    pub(crate) fn send_to_as<T, F: Fn(PathBuf) -> T>(self, tx: mpsc::Sender<T>, to_item: F) {
+        for path in self {
+            if tx.send(to_item(path)).is_err() {
                 log::error!("Send failed");
                 break;
             }
