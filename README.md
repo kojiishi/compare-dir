@@ -160,8 +160,9 @@ please use `-c update` option instead.
 This option prints the same output as `-c check`,
 but also updates the [hash cache].
 
-### Find Duplicates
-[find duplicates]: #find-duplicates
+### Find Duplicated Files
+[find duplicated files]: #find-duplicated-files
+[find duplicates]: #find-duplicated-files
 
 `compare-dir` discovers exact duplicated files
 with the `-c dup` option.
