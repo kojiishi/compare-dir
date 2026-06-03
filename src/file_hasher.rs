@@ -324,10 +324,7 @@ impl FileHasher {
     fn print_duplicates_results(&self, duplicates: &Vec<DuplicatedFiles>) -> anyhow::Result<u64> {
         let mut total_wasted_space = 0;
         for dupes in duplicates {
-            match self.output_format {
-                OutputFormat::Yaml | OutputFormat::Symbol => dupes.write_yaml(std::io::stdout())?,
-                OutputFormat::Default => dupes.write_human(std::io::stdout())?,
-            }
+            dupes.print(self.output_format)?;
             total_wasted_space += dupes.wasted_size();
         }
         Ok(total_wasted_space)
@@ -576,6 +573,14 @@ pub struct DuplicatedFiles {
 }
 
 impl DuplicatedFiles {
+    fn print(&self, output_format: OutputFormat) -> anyhow::Result<()> {
+        match output_format {
+            OutputFormat::Yaml | OutputFormat::Symbol => self.write_yaml(std::io::stdout())?,
+            OutputFormat::Default => self.write_human(std::io::stdout())?,
+        }
+        Ok(())
+    }
+
     fn write_human(&self, mut writer: impl io::Write) -> anyhow::Result<()> {
         writeln!(
             writer,
