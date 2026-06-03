@@ -1,6 +1,7 @@
 use clap::{ArgAction, Parser};
 use compare_dir::{
-    DirectoryComparer, FileComparer, FileComparisonMethod, FileHasher, ProgressBuilder,
+    DirectoryComparer, FileComparer, FileComparisonMethod, FileHasher, OutputFormat,
+    ProgressBuilder,
 };
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use std::{
@@ -19,6 +20,26 @@ enum CompareMethod {
     Check,
     Update,
     Dup,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum CliOutputFormat {
+    #[value(alias = "d")]
+    Default,
+    #[value(alias = "s")]
+    Symbol,
+    #[value(alias = "y", alias = "yml")]
+    Yaml,
+}
+
+impl From<CliOutputFormat> for OutputFormat {
+    fn from(value: CliOutputFormat) -> Self {
+        match value {
+            CliOutputFormat::Default => OutputFormat::Default,
+            CliOutputFormat::Symbol => OutputFormat::Symbol,
+            CliOutputFormat::Yaml => OutputFormat::Yaml,
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -40,6 +61,10 @@ struct Args {
     #[arg(short, long)]
     symbol: bool,
 
+    /// Output format.
+    #[arg(short = 'o', long, default_value = "default")]
+    out: CliOutputFormat,
+
     /// Buffer size when reading files in KB. If 0, uses mmap.
     #[arg(short = 'B', long, default_value_t = FileComparer::DEFAULT_BUFFER_SIZE_KB)]
     buffer: usize,
@@ -51,6 +76,15 @@ struct Args {
     /// Enable verbose logging to stderr.
     #[arg(short, long, action = ArgAction::Count)]
     verbose: u8,
+}
+
+impl Args {
+    fn output_format(&self) -> OutputFormat {
+        if self.out == CliOutputFormat::Default && self.symbol {
+            return OutputFormat::Symbol;
+        }
+        OutputFormat::from(self.out)
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -87,14 +121,14 @@ fn compare_main(
     if args.paths.len() != 2 {
         anyhow::bail!("\"{:?}\" mode requires two directories.", args.compare);
     }
-    let mut paths = args.paths.into_iter();
-    let dir1 = paths.next().unwrap();
-    let dir2 = paths.next().unwrap();
+    let mut paths = args.paths.iter();
+    let dir1 = paths.next().unwrap().clone();
+    let dir2 = paths.next().unwrap().clone();
     let mut comparer = DirectoryComparer::new(dir1, dir2);
     comparer.buffer_size = args.buffer * 1024;
     comparer.comparison_method = comparison_method;
     comparer.exclude = build_exclude(&args.exclude)?;
-    comparer.is_symbols_format = args.symbol;
+    comparer.output_format = args.output_format();
     comparer.jobs = args.jobs;
     comparer.progress = Some(Arc::new(progress));
     comparer.run()
@@ -107,7 +141,7 @@ fn build_hasher(args: Args, progress: ProgressBuilder) -> anyhow::Result<FileHas
     let mut hasher = FileHasher::new(&args.paths)?;
     hasher.buffer_size = args.buffer * 1024;
     hasher.exclude = build_exclude(&args.exclude)?;
-    hasher.is_yaml_format = args.symbol;
+    hasher.output_format = args.output_format();
     hasher.jobs = args.jobs;
     hasher.progress = Some(Arc::new(progress));
     Ok(hasher)

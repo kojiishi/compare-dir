@@ -1,6 +1,6 @@
 use crate::{
-    ColumnFormatter, DirectoryComparer, FileComparer, FileHashCache, FileIterator, Progress,
-    ProgressBuilder,
+    ColumnFormatter, DirectoryComparer, FileComparer, FileHashCache, FileIterator, OutputFormat,
+    Progress, ProgressBuilder,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
@@ -58,7 +58,7 @@ pub struct FileHasher {
     num_hash_looked_up: AtomicUsize,
     pub exclude: Option<GlobSet>,
     pub progress: Option<Arc<ProgressBuilder>>,
-    pub is_yaml_format: bool,
+    pub output_format: OutputFormat,
     pub jobs: usize,
 }
 
@@ -78,7 +78,7 @@ impl FileHasher {
             num_hash_looked_up: AtomicUsize::new(0),
             exclude: None,
             progress: None,
-            is_yaml_format: false,
+            output_format: OutputFormat::Default,
             jobs: Self::DEFAULT_JOBS,
         })
     }
@@ -137,6 +137,10 @@ impl FileHasher {
 
     /// Executes the check/update process.
     pub fn check(&self, update: bool) -> anyhow::Result<()> {
+        if self.output_format != OutputFormat::Default && self.output_format != OutputFormat::Symbol
+        {
+            anyhow::bail!("Check mode only supports default or symbol output format.");
+        }
         if self.dirs.len() > 1 {
             anyhow::bail!("Check mode only supports one directory.");
         }
@@ -311,17 +315,22 @@ impl FileHasher {
         let mut total_wasted_space = 0;
         if !duplicates.is_empty() {
             duplicates.sort_by_key(|a| a.size);
-            for dupes in &duplicates {
-                if self.is_yaml_format {
-                    dupes.write_yaml(std::io::stdout())?;
-                } else {
-                    dupes.write_human(std::io::stdout())?;
-                }
-                total_wasted_space += dupes.wasted_size();
-            }
+            total_wasted_space = self.print_duplicates_results(&duplicates)?;
         }
         self.print_duplicates_summary(&start_time, total_wasted_space)?;
         Ok(())
+    }
+
+    fn print_duplicates_results(&self, duplicates: &Vec<DuplicatedFiles>) -> anyhow::Result<u64> {
+        let mut total_wasted_space = 0;
+        for dupes in duplicates {
+            match self.output_format {
+                OutputFormat::Yaml | OutputFormat::Symbol => dupes.write_yaml(std::io::stdout())?,
+                OutputFormat::Default => dupes.write_human(std::io::stdout())?,
+            }
+            total_wasted_space += dupes.wasted_size();
+        }
+        Ok(total_wasted_space)
     }
 
     fn print_duplicates_summary(

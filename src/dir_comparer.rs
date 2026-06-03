@@ -1,6 +1,6 @@
 use crate::{
     Classification, ColumnFormatter, FileComparer, FileComparisonResult, FileHasher, FileIterator,
-    Progress, ProgressBuilder,
+    OutputFormat, Progress, ProgressBuilder,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
@@ -38,7 +38,7 @@ pub enum FileComparisonMethod {
 pub struct DirectoryComparer {
     dir1: PathBuf,
     dir2: PathBuf,
-    pub is_symbols_format: bool,
+    pub output_format: OutputFormat,
     pub buffer_size: usize,
     pub comparison_method: FileComparisonMethod,
     pub exclude: Option<GlobSet>,
@@ -54,7 +54,7 @@ impl DirectoryComparer {
         Self {
             dir1,
             dir2,
-            is_symbols_format: false,
+            output_format: OutputFormat::Default,
             buffer_size: FileComparer::DEFAULT_BUFFER_SIZE,
             comparison_method: FileComparisonMethod::Hash,
             exclude: None,
@@ -66,6 +66,9 @@ impl DirectoryComparer {
     /// Executes the directory comparison and prints results to stdout.
     /// This is a convenience method for CLI usage.
     pub fn run(&self) -> anyhow::Result<()> {
+        if self.output_format == OutputFormat::Yaml {
+            anyhow::bail!("YAML format is not supported for directory comparison.");
+        }
         if self.dir1.is_file() {
             return self.run_file_comparer();
         }
@@ -100,22 +103,26 @@ impl DirectoryComparer {
                     }
                     CompareProgress::Result(_, result) => {
                         summary.update(&result);
-                        if self.is_symbols_format {
-                            progress.suspend_for(stdout(), || {
+                        match self.output_format {
+                            OutputFormat::Symbol => progress.suspend_for(stdout(), || {
                                 println!(
                                     "{} {}",
                                     result.to_symbol_string(),
                                     result.relative_path.display()
                                 );
-                            })
-                        } else if !result.is_identical() {
-                            progress.suspend_for(stdout(), || {
-                                println!(
-                                    "{}: {}",
-                                    result.relative_path.display(),
-                                    result.to_string(dir1_str, dir2_str)
-                                );
-                            });
+                            }),
+                            OutputFormat::Default => {
+                                if !result.is_identical() {
+                                    progress.suspend_for(stdout(), || {
+                                        println!(
+                                            "{}: {}",
+                                            result.relative_path.display(),
+                                            result.to_string(dir1_str, dir2_str)
+                                        );
+                                    });
+                                }
+                            }
+                            OutputFormat::Yaml => unreachable!(),
                         }
                     }
                     CompareProgress::FileDone => progress.inc(1),
@@ -310,11 +317,15 @@ impl DirectoryComparer {
         let should_compare_content = self.comparison_method != FileComparisonMethod::Size;
         result.update(&comparer, should_compare_content)?;
         let file1_str = file1.to_str().unwrap_or("file1");
-        if self.is_symbols_format {
-            println!("{} {}", result.to_symbol_string(), file1_str);
-        } else {
-            let file2_str = file2.to_str().unwrap_or("file2");
-            println!("{}: {}", file1_str, result.to_string(file1_str, file2_str));
+        match self.output_format {
+            OutputFormat::Symbol => {
+                println!("{} {}", result.to_symbol_string(), file1_str);
+            }
+            OutputFormat::Default => {
+                let file2_str = file2.to_str().unwrap_or("file2");
+                println!("{}: {}", file1_str, result.to_string(file1_str, file2_str));
+            }
+            OutputFormat::Yaml => unreachable!(),
         }
         Self::save_hashers(hashers)?;
         Ok(())
