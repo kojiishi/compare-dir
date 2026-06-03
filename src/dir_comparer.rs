@@ -124,7 +124,7 @@ impl DirectoryComparer {
                                     });
                                 }
                             }
-                            OutputFormat::Yaml => unreachable!(),
+                            _ => unreachable!(),
                         }
                     }
                     CompareProgress::FileDone => progress.inc(1),
@@ -328,7 +328,7 @@ impl DirectoryComparer {
                 let file2_str = file2.to_str().unwrap_or("file2");
                 println!("{}: {}", file1_str, result.to_string(file1_str, file2_str));
             }
-            OutputFormat::Yaml => unreachable!(),
+            _ => unreachable!(),
         }
         Self::save_hashers(hashers)?;
         Ok(())

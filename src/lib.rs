@@ -25,6 +25,8 @@ pub enum OutputFormat {
     Default,
     Symbol,
     Yaml,
+    Shell,
+    PowerShell,
 }
 
 use std::path::{Path, PathBuf};
