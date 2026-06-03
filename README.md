@@ -80,12 +80,23 @@ how files are compared.
 | rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
 | full | Compare file contents byte-by-byte. |
 
-#### Symbols
+#### Output Formats
 
 When comparing two directories,
 the output is human-readable by default.
-The `--symbol` (or `-s`) option changes the output format to be symbolized,
-which is easier for programs to read.
+The `--out` (or `-o`) option can change the output format.
+
+| `--out` | Alias | Meaning |
+| --- | --- | --- |
+| default | d | Human-readable output. |
+| symbol | s | Symbolized output, easier for programs to read. See [symbols]. |
+
+For backward compatibility, `--symbol` (or `-s`) is also supported and is equivalent to `--out symbol`.
+
+##### Symbols
+[symbols]: #symbols
+
+The symbolized format (`--out symbol`) output is as follows:
 
 | Position | Character | Meaning |
 | --- | :---: | --- |
@@ -113,15 +124,15 @@ The following bash example creates a list of paths of the same file sizes,
 but different contents.
 They often indicate possible copy failures or corruptions.
 ```bash
-compare-dir -s <dir1> <dir2> | grep '^..!' | cut -c 5-
+compare-dir -o symbol <dir1> <dir2> | grep '^..!' | cut -c 5-
 ```
 If you prefer `sed` over `cut`:
 ```bash
-compare-dir -s <dir1> <dir2> | grep '^..!' | sed 's/^....//'
+compare-dir -o symbol <dir1> <dir2> | grep '^..!' | sed 's/^....//'
 ```
 To do this in PowerShell:
 ```powershell
-(compare-dir -s <dir1> <dir2>) -match '^..!' -replace '^....'
+(compare-dir -o symbol <dir1> <dir2>) -match '^..!' -replace '^....'
 ```
 
 ### Find Changed or Corrupted Files
@@ -176,12 +187,13 @@ Finding duplicated files from multiple directories is also supported.
 compare-dir -c dup <dir1> <dir2> <dir3>
 ```
 
+#### Output Formats
 
-The `--symbol` (or `-s` for short) prints the results in the YAML format.
-Please use other tools such as [yq] if you need to
+The `--out yaml` (or `-o yaml` / `-o y` / `-o yml`) outputs the results in the YAML format.
+You can use other tools such as [yq] to
 convert the YAML results to JSON or other formats.
 ```shell-session
-compare-dir -s -c dup <dir> | yq -o json
+compare-dir -o yaml -c dup <dir> | yq -o json
 ```
 
 [yq]: https://github.com/mikefarah/yq

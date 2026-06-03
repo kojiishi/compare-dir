@@ -19,6 +19,14 @@ pub use progress::ProgressBuilder;
 pub(crate) use sort_stream::sort_stream;
 pub(crate) use system_time_ext::SystemTimeExt;
 
+/// Output format for comparison results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputFormat {
+    Default,
+    Symbol,
+    Yaml,
+}
+
 use std::path::{Path, PathBuf, StripPrefixError};
 
 pub(crate) fn build_thread_pool(
