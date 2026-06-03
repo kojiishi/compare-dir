@@ -66,8 +66,9 @@ impl DirectoryComparer {
     /// Executes the directory comparison and prints results to stdout.
     /// This is a convenience method for CLI usage.
     pub fn run(&self) -> anyhow::Result<()> {
-        if self.output_format == OutputFormat::Yaml {
-            anyhow::bail!("YAML format is not supported for directory comparison.");
+        match self.output_format {
+            OutputFormat::Default | OutputFormat::Symbol => {}
+            _ => anyhow::bail!("Compare mode only supports default or symbol output format."),
         }
         if self.dir1.is_file() {
             return self.run_file_comparer();

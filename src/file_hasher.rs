@@ -137,9 +137,9 @@ impl FileHasher {
 
     /// Executes the check/update process.
     pub fn check(&self, update: bool) -> anyhow::Result<()> {
-        if self.output_format != OutputFormat::Default && self.output_format != OutputFormat::Symbol
-        {
-            anyhow::bail!("Check mode only supports default or symbol output format.");
+        match self.output_format {
+            OutputFormat::Default | OutputFormat::Symbol => {}
+            _ => anyhow::bail!("Check mode only supports default or symbol output format."),
         }
         if self.dirs.len() > 1 {
             anyhow::bail!("Check mode only supports one directory.");
@@ -575,8 +575,8 @@ pub struct DuplicatedFiles {
 impl DuplicatedFiles {
     fn print(&self, output_format: OutputFormat) -> anyhow::Result<()> {
         match output_format {
-            OutputFormat::Yaml | OutputFormat::Symbol => self.write_yaml(std::io::stdout())?,
-            OutputFormat::Default => self.write_human(std::io::stdout())?,
+            OutputFormat::Default => self.write_human(stdout())?,
+            OutputFormat::Yaml | OutputFormat::Symbol => self.write_yaml(stdout())?,
         }
         Ok(())
     }
