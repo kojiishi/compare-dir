@@ -4,12 +4,8 @@ use compare_dir::{
     ProgressBuilder,
 };
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
-use std::{
-    env,
-    io::{self, Write},
-    path::PathBuf,
-    sync::Arc,
-};
+use simple_unc::SimpleUnc;
+use std::{env, io::Write, path::PathBuf, sync::Arc};
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
 enum CompareMethod {
@@ -166,11 +162,11 @@ fn init_logger(verbose: u8, progress: &ProgressBuilder) {
     progress.init_logger(builder.build()).unwrap();
 }
 
-fn ensure_absolute_path(path: &mut PathBuf) -> io::Result<()> {
+fn ensure_absolute_path(path: &mut PathBuf) -> anyhow::Result<()> {
     // `canonicalize` instead of `absolute` to ensure cache paths match on case
     // insensitive file systems.
     // Use `dunce` to minimize unnecessary UNC on Windows.
-    *path = dunce::canonicalize(&path)?;
+    *path = SimpleUnc::default().canonicalize(&path)?;
     Ok(())
 }
 
