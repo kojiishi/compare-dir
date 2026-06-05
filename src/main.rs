@@ -165,8 +165,11 @@ fn init_logger(verbose: u8, progress: &ProgressBuilder) {
 fn ensure_absolute_path(path: &mut PathBuf) -> anyhow::Result<()> {
     // `canonicalize` instead of `absolute` to ensure cache paths match on case
     // insensitive file systems.
-    // Use `dunce` to minimize unnecessary UNC on Windows.
-    *path = SimpleUnc::default().canonicalize(&path)?;
+    let unc = SimpleUnc {
+        map_to_drive: !path.as_os_str().as_encoded_bytes().starts_with(br"\\"),
+        ..Default::default()
+    };
+    *path = unc.canonicalize(&path)?;
     Ok(())
 }
 
