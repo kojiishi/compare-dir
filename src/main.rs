@@ -4,7 +4,7 @@ use compare_dir::{
     ProgressBuilder,
 };
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
-use simple_unc::SimpleUnc;
+use simple_path::SimplePath;
 use std::{env, io::Write, path::PathBuf, sync::Arc};
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
@@ -165,11 +165,11 @@ fn init_logger(verbose: u8, progress: &ProgressBuilder) {
 fn ensure_absolute_path(path: &mut PathBuf) -> anyhow::Result<()> {
     // `canonicalize` instead of `absolute` to ensure cache paths match on case
     // insensitive file systems.
-    let unc = SimpleUnc {
+    let simple = SimplePath {
         map_to_drive: !path.as_os_str().as_encoded_bytes().starts_with(br"\\"),
         ..Default::default()
     };
-    *path = unc.canonicalize(&path)?;
+    *path = simple.canonicalize(&path)?;
     Ok(())
 }
 
