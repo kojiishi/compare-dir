@@ -26,16 +26,12 @@ enum CliOutputFormat {
     Symbol,
     #[value(alias = "y", alias = "yml")]
     Yaml,
-    Sh,
-    Pwsh,
 }
 
 impl From<CliOutputFormat> for OutputFormat {
     fn from(value: CliOutputFormat) -> Self {
         match value {
             CliOutputFormat::Default => OutputFormat::Default,
-            CliOutputFormat::Pwsh => OutputFormat::PowerShell,
-            CliOutputFormat::Sh => OutputFormat::Shell,
             CliOutputFormat::Symbol => OutputFormat::Symbol,
             CliOutputFormat::Yaml => OutputFormat::Yaml,
         }

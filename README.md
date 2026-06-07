@@ -193,8 +193,6 @@ compare-dir -c dup <dir1> <dir2> <dir3>
 | --- | --- | --- |
 | default | d | Human-readable output. |
 | yaml | y, yml | YAML format. |
-| sh | | Shell script (sh, bash, zsh, etc). |
-| pwsh | | PowerShell script. |
 
 The `--out yaml` (or `-o yaml` / `-o y` / `-o yml`) outputs the results in the YAML format.
 You can use other tools such as [yq] to
@@ -202,15 +200,6 @@ convert the YAML results to JSON or other formats.
 ```shell-session
 compare-dir -o yaml -c dup <dir> | yq -o json
 ```
-
-The `--out sh` and `--out pwsh` outputs scripts
-for shell (sh/bash/zsh/etc.) and PowerShell respectively.
-The script copies one file to other duplicated files.
-Running the script deduplicates all files
-if the file system supports copy-on-write,
-such as btrfs on Linux,
-Apple File System (APFS) on Mac,
-or ReFS/Dev Drive on Windows.
 
 [yq]: https://github.com/mikefarah/yq
 
