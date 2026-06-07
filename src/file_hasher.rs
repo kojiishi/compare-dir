@@ -5,6 +5,7 @@ use crate::{
 use globset::GlobSet;
 use indicatif::FormattedDuration;
 use rayon::prelude::*;
+use simple_path::SimplePath;
 use std::{
     collections::HashMap,
     fs,
@@ -106,7 +107,7 @@ impl FileHasher {
     /// Remove a cache entry if it exists.
     pub(crate) fn remove_cache_entry(&mut self, path: &Path) -> anyhow::Result<()> {
         let cache = self.cache()?;
-        let relative = crate::strip_prefix(path, cache.base_dir())?;
+        let relative = SimplePath::strip_prefix(path, cache.base_dir())?;
         cache.remove(relative);
         Ok(())
     }
@@ -129,7 +130,7 @@ impl FileHasher {
     pub(crate) fn clear_cache(&mut self) -> anyhow::Result<()> {
         let cache = self.cache()?;
         for dir in &self.dirs {
-            let relative = crate::strip_prefix(dir, cache.base_dir())?;
+            let relative = SimplePath::strip_prefix(dir, cache.base_dir())?;
             cache.clear(relative);
         }
         Ok(())
@@ -230,7 +231,7 @@ impl FileHasher {
         assert_eq!(self.dirs.len(), 1);
         let cache = self.new_cache()?;
         let base_dir = &self.dirs[0];
-        let relative = crate::strip_prefix(base_dir, cache.base_dir())?;
+        let relative = SimplePath::strip_prefix(base_dir, cache.base_dir())?;
         cache.set_remove_if_no_access(relative);
         let cache_clone = Arc::clone(&cache);
         std::thread::scope(|global_scope| {
@@ -250,7 +251,7 @@ impl FileHasher {
                         let status = self.check_file(&path, &cache, update);
                         let event = match status {
                             Ok(CheckStatus::New) | Ok(CheckStatus::Modified) => {
-                                let rel_path = crate::strip_prefix(&path, base_dir).unwrap();
+                                let rel_path = SimplePath::strip_prefix(&path, base_dir).unwrap();
                                 CheckEvent::Result(rel_path.into(), status.unwrap())
                             }
                             Ok(CheckStatus::Unchanged) => CheckEvent::FileDone,
@@ -280,7 +281,7 @@ impl FileHasher {
     ) -> anyhow::Result<CheckStatus> {
         assert!(abs_path.is_absolute());
         let computed_hash = self.compute_hash(abs_path)?;
-        let rel_path = crate::strip_prefix(abs_path, cache.base_dir())?;
+        let rel_path = SimplePath::strip_prefix(abs_path, cache.base_dir())?;
         let cached_hash = cache.get_by_path(rel_path);
         let status = match cached_hash {
             None => CheckStatus::New,
@@ -517,7 +518,7 @@ impl FileHasher {
         modified: time::SystemTime,
         cache: &FileHashCache,
     ) -> io::Result<(Option<blake3::Hash>, &'a Path)> {
-        let relative = crate::strip_prefix(path, cache.base_dir())
+        let relative = SimplePath::strip_prefix(path, cache.base_dir())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
         if let Some(hash) = cache.get(relative, modified) {
             self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);

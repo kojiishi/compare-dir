@@ -27,7 +27,7 @@ pub enum OutputFormat {
     Yaml,
 }
 
-use std::path::{Path, PathBuf, StripPrefixError};
+use std::path::{Path, PathBuf};
 
 pub(crate) fn build_thread_pool(
     threads: usize,
@@ -49,25 +49,6 @@ pub(crate) fn human_readable_size(size: u64) -> String {
         }
     }
     format!("{:.1}GB", size / KB_AS_F)
-}
-
-/// Workaround for https://github.com/kojiishi/compare-dir/issues/8
-pub(crate) fn strip_prefix<'a>(path: &'a Path, base: &Path) -> Result<&'a Path, StripPrefixError> {
-    let result = path.strip_prefix(base);
-    #[cfg(windows)]
-    if let Ok(result_path) = result {
-        let result_os_str = result_path.as_os_str();
-        let result_bytes = result_os_str.as_encoded_bytes();
-        if !result_bytes.is_empty() && result_bytes[0] as char == std::path::MAIN_SEPARATOR {
-            // TODO: Use `slice_encoded_bytes` once stabilized.
-            // https://github.com/rust-lang/rust/issues/118485
-            return Ok(Path::new(unsafe {
-                use std::ffi::OsStr;
-                OsStr::from_encoded_bytes_unchecked(&result_bytes[1..])
-            }));
-        }
-    }
-    result
 }
 
 pub(crate) fn common_ancestor(paths: &[impl AsRef<Path>]) -> Option<PathBuf> {
@@ -107,26 +88,6 @@ mod tests {
         assert_eq!(human_readable_size(1024 * 1024), "1.0MB");
         assert_eq!(human_readable_size(1024 * 1024 * 1024), "1.0GB");
         assert_eq!(human_readable_size(1024 * 1024 * 1024 * 1024), "1024.0GB");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn strip_prefix_share_root() -> anyhow::Result<()> {
-        let path = Path::new(r"\\server\share\dir1\dir2");
-        let base = Path::new(r"\\server\share");
-        assert_eq!(strip_prefix(path, base)?.to_str().unwrap(), r"dir1\dir2");
-        assert_eq!(path.strip_prefix(base)?.to_str().unwrap(), r"dir1\dir2");
-        Ok(())
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn strip_prefix_unc_root() -> anyhow::Result<()> {
-        let path = Path::new(r"\\?\UNC\server\share\dir1\dir2");
-        let base = Path::new(r"\\?\UNC\server\share");
-        assert_eq!(strip_prefix(path, base)?.to_str().unwrap(), r"dir1\dir2");
-        // assert_eq!(path.strip_prefix(base)?.to_str().unwrap(), r"dir1\dir2");
-        Ok(())
     }
 
     #[test]

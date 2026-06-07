@@ -179,7 +179,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "compare-dir"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "anyhow",
  "blake3",
@@ -191,7 +191,7 @@ dependencies = [
  "log",
  "memmap2",
  "rayon",
- "simple-unc",
+ "simple-path",
  "tempfile",
  "walkdir",
 ]
@@ -690,13 +690,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
-name = "simple-unc"
-version = "0.2.2"
+name = "simple-path"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cbd1ee9e300f40dbb50dada3342766c6550d5f46197c892cdad518b275bb03c"
+checksum = "768f8d7fd7f352cd8f3801edb9d06adfb2833870f6968199de828354e02b925a"
 dependencies = [
  "anyhow",
  "dunce",
+ "log",
  "windows",
 ]
 

@@ -4,6 +4,7 @@ use crate::{
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
+use simple_path::SimplePath;
 use std::{
     cmp::Ordering,
     io::{self, stdout},
@@ -179,8 +180,8 @@ impl DirectoryComparer {
                 loop {
                     let cmp = match (&cur1, &cur2) {
                         (Some(p1), Some(p2)) => {
-                            let rel1 = crate::strip_prefix(p1, &self.dir1).unwrap();
-                            let rel2 = crate::strip_prefix(p2, &self.dir2).unwrap();
+                            let rel1 = SimplePath::strip_prefix(p1, &self.dir1).unwrap();
+                            let rel2 = SimplePath::strip_prefix(p2, &self.dir2).unwrap();
                             rel1.cmp(rel2)
                         }
                         (Some(_), None) => Ordering::Less,
@@ -190,7 +191,7 @@ impl DirectoryComparer {
                     match cmp {
                         Ordering::Less => {
                             let path1 = cur1.take().unwrap();
-                            let rel1 = crate::strip_prefix(&path1, &self.dir1).unwrap();
+                            let rel1 = SimplePath::strip_prefix(&path1, &self.dir1).unwrap();
                             let result =
                                 FileComparisonResult::new(rel1.into(), Classification::OnlyInDir1);
                             tx.send(CompareProgress::Result(index, result))?;
@@ -200,7 +201,7 @@ impl DirectoryComparer {
                         }
                         Ordering::Greater => {
                             let path2 = cur2.take().unwrap();
-                            let rel2 = crate::strip_prefix(&path2, &self.dir2).unwrap();
+                            let rel2 = SimplePath::strip_prefix(&path2, &self.dir2).unwrap();
                             let result =
                                 FileComparisonResult::new(rel2.into(), Classification::OnlyInDir2);
                             tx.send(CompareProgress::Result(index, result))?;
@@ -222,7 +223,8 @@ impl DirectoryComparer {
                                 if let Some((h1, h2)) = hashers_ref {
                                     comparer.hashers = Some((h1, h2));
                                 }
-                                let rel_path = crate::strip_prefix(&path1, &self.dir1).unwrap();
+                                let rel_path =
+                                    SimplePath::strip_prefix(&path1, &self.dir1).unwrap();
                                 let mut result = FileComparisonResult::new(
                                     rel_path.into(),
                                     Classification::InBoth,

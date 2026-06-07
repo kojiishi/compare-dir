@@ -1,5 +1,6 @@
 use blake3::Hash;
 use indicatif::FormattedDuration;
+use simple_path::SimplePath;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
@@ -127,7 +128,7 @@ impl FileHashCache {
     pub fn merge(&self, other: &Self) {
         assert!(!std::ptr::eq(self, other), "Cannot merge cache with itself");
         let rel_prefix =
-            crate::strip_prefix(&other.base_dir, &self.base_dir).unwrap_or_else(|_| {
+            SimplePath::strip_prefix(&other.base_dir, &self.base_dir).unwrap_or_else(|_| {
                 panic!(
                     "Cannot merge cache from {:?} into {:?}",
                     other.base_dir, self.base_dir
