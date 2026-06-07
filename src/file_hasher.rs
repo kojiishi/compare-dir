@@ -574,9 +574,15 @@ pub struct DuplicatedFiles {
 }
 
 impl DuplicatedFiles {
+    fn wasted_size(&self) -> u64 {
+        self.size * (self.paths.len() as u64 - 1)
+    }
+
     fn print(&self, output_format: OutputFormat) -> anyhow::Result<()> {
         match output_format {
             OutputFormat::Default => self.write_human(stdout())?,
+            OutputFormat::PowerShell => self.write_pwsh(stdout())?,
+            OutputFormat::Shell => self.write_shell(stdout())?,
             OutputFormat::Yaml | OutputFormat::Symbol => self.write_yaml(stdout())?,
         }
         Ok(())
@@ -604,8 +610,36 @@ impl DuplicatedFiles {
         Ok(())
     }
 
-    fn wasted_size(&self) -> u64 {
-        self.size * (self.paths.len() as u64 - 1)
+    fn write_shell(&self, writer: impl io::Write) -> anyhow::Result<()> {
+        self.write_shell_with(writer, "cp", Self::escape_shell)
+    }
+
+    fn write_pwsh(&self, writer: impl io::Write) -> anyhow::Result<()> {
+        self.write_shell_with(writer, "Copy-Item -LiteralPath", Self::escape_shell_double)
+    }
+
+    fn write_shell_with(
+        &self,
+        mut writer: impl io::Write,
+        cmd: &str,
+        stringify: impl Fn(&Path) -> String,
+    ) -> anyhow::Result<()> {
+        let mut iter = self.paths.iter();
+        if let Some(path0) = iter.next() {
+            let path0 = stringify(path0);
+            for path in iter {
+                writeln!(writer, "{cmd} '{path0}' '{}'", stringify(path))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn escape_shell(path: &Path) -> String {
+        path.to_string_lossy().replace('\'', "\'\\'\'")
+    }
+
+    fn escape_shell_double(path: &Path) -> String {
+        path.to_string_lossy().replace('\'', "\'\'")
     }
 }
 
@@ -976,6 +1010,95 @@ mod tests {
         fs::create_dir(&dir2)?;
         let hasher = FileHasher::new(&[&dir1, &dir2])?;
         assert!(hasher.check(false).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn escape_shell() {
+        let escape_shell = |p: &str| DuplicatedFiles::escape_shell(Path::new(p));
+        assert_eq!(escape_shell(""), "");
+        assert_eq!(escape_shell("abc"), "abc");
+        assert_eq!(escape_shell("a'b"), "a'\\''b");
+        assert_eq!(escape_shell("a'b'"), "a'\\''b'\\''");
+
+        let escape_shell_double = |p: &str| DuplicatedFiles::escape_shell_double(Path::new(p));
+        assert_eq!(escape_shell_double(""), "");
+        assert_eq!(escape_shell_double("abc"), "abc");
+        assert_eq!(escape_shell_double("a'b"), "a''b");
+        assert_eq!(escape_shell_double("a'b'"), "a''b''");
+    }
+
+    #[test]
+    fn write_dups_shell_empty() -> anyhow::Result<()> {
+        let dup_empty = DuplicatedFiles {
+            paths: vec![],
+            size: 100,
+        };
+        let mut buf = Vec::new();
+        dup_empty.write_shell(&mut buf)?;
+        assert_eq!(String::from_utf8(buf)?, "");
+        Ok(())
+    }
+
+    #[test]
+    fn write_dups_shell_one() -> anyhow::Result<()> {
+        let dup_one = DuplicatedFiles {
+            paths: vec![PathBuf::from("a.txt")],
+            size: 100,
+        };
+        let mut buf = Vec::new();
+        dup_one.write_shell(&mut buf)?;
+        assert_eq!(String::from_utf8(buf)?, "");
+        Ok(())
+    }
+
+    #[test]
+    fn write_dups_shell_two() -> anyhow::Result<()> {
+        let dup_multiple = DuplicatedFiles {
+            paths: vec![PathBuf::from("a.txt"), PathBuf::from("b.txt")],
+            size: 100,
+        };
+        let mut buf = Vec::new();
+        dup_multiple.write_shell(&mut buf)?;
+        assert_eq!(String::from_utf8(buf)?, "cp 'a.txt' 'b.txt'\n");
+        Ok(())
+    }
+
+    #[test]
+    fn write_dups_shell_three() -> anyhow::Result<()> {
+        let dup_multiple = DuplicatedFiles {
+            paths: vec![
+                PathBuf::from("a.txt"),
+                PathBuf::from("b.txt"),
+                PathBuf::from("c.txt"),
+            ],
+            size: 100,
+        };
+        let mut buf = Vec::new();
+        dup_multiple.write_shell(&mut buf)?;
+        assert_eq!(
+            String::from_utf8(buf)?,
+            "cp 'a.txt' 'b.txt'\ncp 'a.txt' 'c.txt'\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn write_dups_shell_quotes() -> anyhow::Result<()> {
+        let dup_quotes = DuplicatedFiles {
+            paths: vec![PathBuf::from("a'b.txt"), PathBuf::from("c'd.txt")],
+            size: 100,
+        };
+        let mut buf = Vec::new();
+        dup_quotes.write_shell(&mut buf)?;
+        assert_eq!(String::from_utf8(buf)?, "cp 'a'\\''b.txt' 'c'\\''d.txt'\n");
+
+        let mut buf = Vec::new();
+        dup_quotes.write_pwsh(&mut buf)?;
+        assert_eq!(
+            String::from_utf8(buf)?,
+            "Copy-Item -LiteralPath 'a''b.txt' 'c''d.txt'\n"
+        );
         Ok(())
     }
 }
