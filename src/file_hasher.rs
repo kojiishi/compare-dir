@@ -256,7 +256,7 @@ impl FileHasher {
                             }
                             Ok(CheckStatus::Unchanged) => CheckEvent::FileDone,
                             Err(e) => {
-                                log::error!("Failed to check file {:?}: {}", path, e);
+                                log::error!("Failed to check file '{}': {}", path.display(), e);
                                 CheckEvent::Error
                             }
                         };
@@ -491,7 +491,7 @@ impl FileHasher {
                 cache.insert(&relative, modified, hash);
                 let _ = tx.send(DupEvent::Result(path, size, hash));
             } else {
-                log::error!("Failed to hash file: {:?}", path);
+                log::error!("Failed to hash file: '{}'", path.display());
                 let _ = tx.send(DupEvent::Error);
             }
         });
@@ -558,9 +558,9 @@ impl FileHasher {
         self.num_hashed.fetch_add(1, Ordering::Relaxed);
         let hash = hasher.finalize();
         log::debug!(
-            "Computed hash in {}: {:?}",
+            "Computed hash in {}: '{}'",
             FormattedDuration(start_time.elapsed()),
-            path
+            path.display()
         );
         Ok(hash)
     }

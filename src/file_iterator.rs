@@ -12,7 +12,7 @@ pub(crate) struct FileIterator<'a> {
 
 impl<'a> FileIterator<'a> {
     pub(crate) fn new(dir: &Path) -> Self {
-        log::info!("Scanning directory: {:?}", dir);
+        log::info!("Scanning directory: '{}'", dir.display());
         let iter = WalkDir::new(dir).sort_by_file_name().into_iter();
         FileIterator {
             iter,
