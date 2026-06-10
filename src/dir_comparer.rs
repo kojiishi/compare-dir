@@ -233,8 +233,8 @@ impl DirectoryComparer {
                                     Ok(_) => CompareProgress::Result(i, result),
                                     Err(error) => {
                                         log::error!(
-                                            "Error comparing {:?}: {}",
-                                            result.relative_path,
+                                            "Error comparing '{}': {}",
+                                            result.relative_path.display(),
                                             error
                                         );
                                         CompareProgress::Error

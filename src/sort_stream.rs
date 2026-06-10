@@ -21,7 +21,7 @@ where
     std::thread::scope(|scope| {
         scope.spawn(move || {
             if let Err(e) = producer(tx_unordered) {
-                log::error!("Error during unordered production: {:?}", e);
+                log::error!("Error during unordered production: {}", e);
             }
         });
 

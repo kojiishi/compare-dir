@@ -146,10 +146,10 @@ impl FileHashCache {
             }
         }
         log::info!(
-            "Merged {} entries from {:?} into {:?}",
+            "Merged {} entries from '{}' into '{}'",
             state.entries.len() - num_entries_before,
-            other.base_dir,
-            self.base_dir,
+            other.base_dir.display(),
+            self.base_dir.display(),
         );
 
         state.merged_child_caches.push(other.base_dir.clone());
@@ -258,9 +258,9 @@ impl FileHashCache {
         std::fs::rename(&temp_path, &path)?;
         state.is_dirty = false;
         log::info!(
-            "Saved {} hashes to {:?} in {}",
+            "Saved {} hashes to '{}' in {}",
             state.entries.len(),
-            path,
+            path.display(),
             FormattedDuration(start_time.elapsed())
         );
         Ok(())
@@ -271,11 +271,11 @@ impl FileHashCache {
         for child_dir in child_caches {
             let child_cache_path = child_dir.join(Self::FILE_NAME);
             if child_cache_path.is_file() {
-                log::info!("Removing child cache {:?}", child_cache_path);
+                log::info!("Removing child cache '{}'", child_cache_path.display());
                 if let Err(error) = std::fs::remove_file(&child_cache_path) {
                     log::warn!(
-                        "Failed to remove child cache {:?}: {:?}",
-                        child_cache_path,
+                        "Failed to remove child cache '{}': {}",
+                        child_cache_path.display(),
                         error
                     );
                 }
@@ -298,14 +298,14 @@ impl FileHashCache {
                     entries.insert(path, entry);
                 }
                 Err(e) => {
-                    log::warn!("Failed to parse cache line {:?}: {:?}", line, e);
+                    log::warn!("Failed to parse cache line {:?}: {}", line, e);
                 }
             }
         }
         log::info!(
-            "Loaded {} hashes from {:?} in {}",
+            "Loaded {} hashes from '{}' in {}",
             entries.len(),
-            path,
+            path.display(),
             FormattedDuration(start_time.elapsed())
         );
         entries
