@@ -1,6 +1,6 @@
 use crate::{
-    ColumnFormatter, DirectoryComparer, FileComparer, FileHashCache, FileIterator, OutputFormat,
-    Progress, ProgressBuilder,
+    ColumnFormatter, DirectoryComparer, FileComparer, FileHashCache, FileItem, FileIterator,
+    OutputFormat, Progress, ProgressBuilder,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
@@ -19,13 +19,13 @@ use std::{
     time,
 };
 
-type FileItem = (PathBuf, usize);
+type FileWithDirIndex = (FileItem, usize);
 
 #[derive(Debug, Clone)]
 enum DupEvent {
     StartHashing,
     NumFiles(usize),
-    Result(PathBuf, u64, blake3::Hash),
+    Result(FileItem, blake3::Hash),
     Error,
 }
 
@@ -46,7 +46,7 @@ enum CheckEvent {
 }
 
 enum DupState {
-    Single(PathBuf, time::SystemTime, usize),
+    Single(FileItem, usize),
     Hashing,
 }
 
@@ -243,20 +243,20 @@ impl FileHasher {
             let pool = crate::build_thread_pool(self.jobs)?;
             pool.scope(move |scope| -> anyhow::Result<()> {
                 let mut total_files = 0;
-                for path in it_rx {
+                for file in it_rx {
                     total_files += 1;
                     let tx = tx.clone();
                     let cache = Arc::clone(&cache);
                     scope.spawn(move |_| {
-                        let status = self.check_file(&path, &cache, update);
+                        let status = self.check_file(&file, &cache, update);
                         let event = match status {
                             Ok(CheckStatus::New) | Ok(CheckStatus::Modified) => {
-                                let rel_path = SimplePath::strip_prefix(&path, base_dir).unwrap();
+                                let rel_path = file.relative_path(base_dir);
                                 CheckEvent::Result(rel_path.into(), status.unwrap())
                             }
                             Ok(CheckStatus::Unchanged) => CheckEvent::FileDone,
                             Err(e) => {
-                                log::error!("Failed to check file '{}': {}", path.display(), e);
+                                log::error!("Failed to check file '{}': {}", file, e);
                                 CheckEvent::Error
                             }
                         };
@@ -275,13 +275,13 @@ impl FileHasher {
 
     fn check_file(
         &self,
-        abs_path: &Path,
+        file: &FileItem,
         cache: &FileHashCache,
         update: bool,
     ) -> anyhow::Result<CheckStatus> {
-        assert!(abs_path.is_absolute());
-        let computed_hash = self.compute_hash(abs_path)?;
-        let rel_path = SimplePath::strip_prefix(abs_path, cache.base_dir())?;
+        assert!(file.path().is_absolute());
+        let computed_hash = self.compute_hash(file.path())?;
+        let rel_path = file.relative_path(cache.base_dir());
         let cached_hash = cache.get_by_path(rel_path);
         let status = match cached_hash {
             None => CheckStatus::New,
@@ -294,7 +294,7 @@ impl FileHasher {
             }
         };
         if update {
-            let modified = fs::metadata(abs_path)?.modified()?;
+            let modified = file.modified();
             match status {
                 CheckStatus::New | CheckStatus::Modified => {
                     cache.insert(rel_path, modified, computed_hash);
@@ -370,15 +370,19 @@ impl FileHasher {
                 match event {
                     DupEvent::StartHashing => progress.set_message("Hashing files..."),
                     DupEvent::NumFiles(num) => progress.set_length(num as u64),
-                    DupEvent::Result(path, size, hash) => {
+                    DupEvent::Result(file, hash) => {
                         progress.inc(1);
                         let entry = by_hash.entry(hash).or_insert_with(|| DuplicatedFiles {
                             paths: Vec::new(),
-                            size,
+                            size: file.size(),
                         });
                         // Hash collisions shouldn't happen, but if they do, sizes shouldn't mismatch.
-                        assert_eq!(entry.size, size, "Hash collision: sizes do not match");
-                        entry.paths.push(path);
+                        assert_eq!(
+                            entry.size,
+                            file.size(),
+                            "Hash collision: sizes do not match"
+                        );
+                        entry.paths.push(file.into_path_buf());
                     }
                     DupEvent::Error => progress.inc(1),
                 }
@@ -405,23 +409,21 @@ impl FileHasher {
                 let mut by_size: HashMap<u64, DupState> = HashMap::new();
                 let mut num_hashed = 0;
                 tx.send(DupEvent::StartHashing)?;
-                for (path, dir_index) in it_rx {
-                    let meta = fs::metadata(&path)?;
-                    let size = meta.len();
+                for (file, dir_index) in it_rx {
+                    let size = file.size();
                     if size == 0 {
                         continue;
                     }
-                    let modified = meta.modified()?;
                     let cache = &caches[dir_index];
                     match by_size.entry(size) {
                         std::collections::hash_map::Entry::Occupied(mut occ) => match occ.get_mut()
                         {
-                            DupState::Single(path0, modified0, dir_index0) => {
+                            DupState::Single(file0, dir_index0) => {
                                 // We found a second file of identical size.
                                 // Time to start hashing both the *original* matching file and the *new* one!
                                 let cache0 = &caches[*dir_index0];
-                                self.send_hash(path0, size, *modified0, cache0, &tx, scope);
-                                self.send_hash(&path, size, modified, cache, &tx, scope);
+                                self.send_hash(file0, cache0, &tx, scope);
+                                self.send_hash(&file, cache, &tx, scope);
 
                                 // Modify the state to indicate we are now fully hashing this size bucket.
                                 *occ.get_mut() = DupState::Hashing;
@@ -429,12 +431,12 @@ impl FileHasher {
                             }
                             DupState::Hashing => {
                                 // File size bucket already hashing; just dynamically spawn the new file immediately.
-                                self.send_hash(&path, size, modified, cache, &tx, scope);
+                                self.send_hash(&file, cache, &tx, scope);
                                 num_hashed += 1;
                             }
                         },
                         std::collections::hash_map::Entry::Vacant(vac) => {
-                            vac.insert(DupState::Single(path, modified, dir_index));
+                            vac.insert(DupState::Single(file, dir_index));
                         }
                     }
                 }
@@ -450,7 +452,7 @@ impl FileHasher {
     fn stream_file_items<'scope, 'env>(
         &'env self,
         scope: &'scope std::thread::Scope<'scope, 'env>,
-    ) -> anyhow::Result<(mpsc::Receiver<FileItem>, Vec<Arc<FileHashCache>>)> {
+    ) -> anyhow::Result<(mpsc::Receiver<FileWithDirIndex>, Vec<Arc<FileHashCache>>)> {
         let (it_tx, it_rx) = mpsc::channel();
         let mut caches = Vec::with_capacity(self.dirs.len());
         for (dir_index, dir) in self.dirs.iter().enumerate() {
@@ -467,60 +469,59 @@ impl FileHasher {
 
     fn send_hash<'scope>(
         &'scope self,
-        path: &Path,
-        size: u64,
-        modified: time::SystemTime,
+        file: &FileItem,
         cache: &Arc<FileHashCache>,
         tx: &mpsc::Sender<DupEvent>,
         scope: &rayon::Scope<'scope>,
     ) {
         let (hash, relative) = self
-            .get_hash_from_cache(path, modified, cache)
+            .get_hash_from_cache(file, cache)
             .expect("path should be in cache base_dir");
         if let Some(hash) = hash {
-            let _ = tx.send(DupEvent::Result(path.to_path_buf(), size, hash));
+            let _ = tx.send(DupEvent::Result(file.clone(), hash));
             return;
         }
 
-        let path = path.to_path_buf();
+        let file = file.clone();
         let relative = relative.to_path_buf();
         let tx = tx.clone();
         let cache = Arc::clone(cache);
         scope.spawn(move |_| {
-            if let Ok(hash) = self.compute_hash(&path) {
-                cache.insert(&relative, modified, hash);
-                let _ = tx.send(DupEvent::Result(path, size, hash));
+            if let Ok(hash) = self.compute_hash(file.path()) {
+                cache.insert(&relative, file.modified(), hash);
+                let _ = tx.send(DupEvent::Result(file, hash));
             } else {
-                log::error!("Failed to hash file: '{}'", path.display());
+                log::error!("Failed to hash file: '{}'", file);
                 let _ = tx.send(DupEvent::Error);
             }
         });
     }
 
     /// Gets the hash of a file, using the cache if available.
-    pub fn get_hash(&self, path: &Path) -> io::Result<blake3::Hash> {
+    pub fn get_hash(&self, path: &Path) -> anyhow::Result<blake3::Hash> {
+        let file = FileItem::try_from(path)?;
+        self._get_hash(&file)
+    }
+
+    fn _get_hash(&self, file: &FileItem) -> anyhow::Result<blake3::Hash> {
         let cache = self.cache.as_ref().expect("cache should be initialized");
-        let meta = fs::metadata(path)?;
-        let modified = meta.modified()?;
-        let (hash, relative) = self.get_hash_from_cache(path, modified, cache)?;
+        let (hash, relative) = self.get_hash_from_cache(file, cache)?;
         if let Some(hash) = hash {
             return Ok(hash);
         }
 
-        let hash = self.compute_hash(path)?;
-        cache.insert(relative, modified, hash);
+        let hash = self.compute_hash(file.path())?;
+        cache.insert(relative, file.modified(), hash);
         Ok(hash)
     }
 
     fn get_hash_from_cache<'a>(
         &self,
-        path: &'a Path,
-        modified: time::SystemTime,
+        file: &'a FileItem,
         cache: &FileHashCache,
     ) -> io::Result<(Option<blake3::Hash>, &'a Path)> {
-        let relative = SimplePath::strip_prefix(path, cache.base_dir())
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        if let Some(hash) = cache.get(relative, modified) {
+        let relative = file.relative_path(cache.base_dir());
+        if let Some(hash) = cache.get(relative, file.modified()) {
             self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
             return Ok((Some(hash), relative));
         }

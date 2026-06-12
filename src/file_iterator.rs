@@ -1,6 +1,7 @@
 use crate::FileHashCache;
+use crate::FileItem;
 use globset::GlobSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, mpsc};
 use walkdir::WalkDir;
 
@@ -21,13 +22,13 @@ impl<'a> FileIterator<'a> {
         }
     }
 
-    pub(crate) fn send_to(self, tx: mpsc::Sender<PathBuf>) {
+    pub(crate) fn send_to(self, tx: mpsc::Sender<FileItem>) {
         self.send_to_as(tx, |path| path);
     }
 
-    pub(crate) fn send_to_as<T, F: Fn(PathBuf) -> T>(self, tx: mpsc::Sender<T>, to_item: F) {
-        for path in self {
-            if tx.send(to_item(path)).is_err() {
+    pub(crate) fn send_to_as<T, F: Fn(FileItem) -> T>(self, tx: mpsc::Sender<T>, to_item: F) {
+        for item in self {
+            if tx.send(to_item(item)).is_err() {
                 log::error!("Send failed");
                 break;
             }
@@ -37,7 +38,7 @@ impl<'a> FileIterator<'a> {
     pub(crate) fn spawn_in_scope<'scope>(
         self,
         scope: &'scope std::thread::Scope<'scope, '_>,
-    ) -> mpsc::Receiver<PathBuf>
+    ) -> mpsc::Receiver<FileItem>
     where
         'a: 'scope,
     {
@@ -48,7 +49,7 @@ impl<'a> FileIterator<'a> {
 }
 
 impl<'a> Iterator for FileIterator<'a> {
-    type Item = PathBuf;
+    type Item = FileItem;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(entry) = self.iter.next() {
@@ -62,7 +63,16 @@ impl<'a> Iterator for FileIterator<'a> {
                     }
 
                     if entry.file_type().is_file() {
-                        return Some(entry.path().to_path_buf());
+                        match FileItem::try_from(&entry) {
+                            Ok(item) => return Some(item),
+                            Err(error) => {
+                                log::error!(
+                                    "Error reading metadata: '{}': {error}",
+                                    entry.path().display()
+                                );
+                                continue;
+                            }
+                        };
                     } else if entry.file_type().is_dir()
                         && let Some(cache) = &self.cache
                     {
@@ -124,7 +134,7 @@ mod tests {
         let it = FileIterator::new(dir_path);
         let files: Vec<_> = it.collect();
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0], file_path);
+        assert_eq!(files[0].path(), file_path);
 
         Ok(())
     }
@@ -143,7 +153,7 @@ mod tests {
         let it = FileIterator::new(&file1_path);
         let files: Vec<_> = it.collect();
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0], file1_path);
+        assert_eq!(files[0].path(), file1_path);
 
         Ok(())
     }

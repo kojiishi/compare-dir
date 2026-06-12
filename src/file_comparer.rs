@@ -1,9 +1,9 @@
-use crate::file_hasher::FileHasher;
+use crate::{FileHasher, FileItem};
 use indicatif::FormattedDuration;
 use std::cmp::Ordering;
 use std::fs;
-use std::io::{self, Read};
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::path::PathBuf;
 
 /// How a file is classified during comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,8 +18,8 @@ pub enum Classification {
 
 /// Compares the content of two files.
 pub struct FileComparer<'a> {
-    path1: &'a Path,
-    path2: &'a Path,
+    file1: &'a FileItem,
+    file2: &'a FileItem,
     pub buffer_size: usize,
     pub hashers: Option<(&'a FileHasher, &'a FileHasher)>,
 }
@@ -28,36 +28,38 @@ impl<'a> FileComparer<'a> {
     pub const DEFAULT_BUFFER_SIZE_KB: usize = 2 * 1024;
     pub const DEFAULT_BUFFER_SIZE: usize = Self::DEFAULT_BUFFER_SIZE_KB * 1024;
 
-    pub fn new(path1: &'a Path, path2: &'a Path) -> Self {
+    pub fn new(file1: &'a FileItem, file2: &'a FileItem) -> Self {
         Self {
-            path1,
-            path2,
+            file1,
+            file2,
             buffer_size: Self::DEFAULT_BUFFER_SIZE,
             hashers: None,
         }
     }
 
-    pub fn metadata(&self) -> io::Result<(fs::Metadata, fs::Metadata)> {
-        let m1 = fs::metadata(self.path1)?;
-        let m2 = fs::metadata(self.path2)?;
-        Ok((m1, m2))
+    pub fn sizes(&self) -> (u64, u64) {
+        (self.file1.size(), self.file2.size())
     }
 
-    pub(crate) fn compare_contents(&self) -> io::Result<bool> {
+    pub fn modified(&self) -> (std::time::SystemTime, std::time::SystemTime) {
+        (self.file1.modified(), self.file2.modified())
+    }
+
+    pub(crate) fn compare_contents(&self) -> anyhow::Result<bool> {
         if let Some((hasher1, hasher2)) = self.hashers {
             let (hash1, hash2) = rayon::join(
-                || hasher1.get_hash(self.path1),
-                || hasher2.get_hash(self.path2),
+                || hasher1.get_hash(self.file1.path()),
+                || hasher2.get_hash(self.file2.path()),
             );
             return Ok(hash1? == hash2?);
         }
 
         let start_time = std::time::Instant::now();
-        let mut f1 = fs::File::open(self.path1)?;
-        let mut f2 = fs::File::open(self.path2)?;
+        let mut f1 = fs::File::open(self.file1.path())?;
+        let mut f2 = fs::File::open(self.file2.path())?;
         if self.buffer_size == 0 {
-            let len1 = f1.metadata()?.len();
-            let len2 = f2.metadata()?.len();
+            let len1 = self.file1.size();
+            let len2 = self.file2.size();
             if len1 != len2 {
                 return Ok(false);
             }
@@ -70,7 +72,7 @@ impl<'a> FileComparer<'a> {
             log::debug!(
                 "Compared in {}: '{}'",
                 FormattedDuration(start_time.elapsed()),
-                self.path1.display()
+                self.file1
             );
             return Ok(result);
         }
@@ -88,7 +90,7 @@ impl<'a> FileComparer<'a> {
                 log::debug!(
                     "Compared in {}: '{}'",
                     FormattedDuration(start_time.elapsed()),
-                    self.path1.display()
+                    self.file1
                 );
                 return Ok(false);
             }
@@ -96,7 +98,7 @@ impl<'a> FileComparer<'a> {
                 log::debug!(
                     "Compared in {}: '{}'",
                     FormattedDuration(start_time.elapsed()),
-                    self.path1.display()
+                    self.file1
                 );
                 return Ok(true);
             }
@@ -135,13 +137,10 @@ impl FileComparisonResult {
         comparer: &FileComparer,
         should_compare_content: bool,
     ) -> anyhow::Result<()> {
-        let (m1, m2) = comparer.metadata()?;
-        let t1 = m1.modified()?;
-        let t2 = m2.modified()?;
+        let (t1, t2) = comparer.modified();
         self.modified_time_comparison = Some(t1.cmp(&t2));
 
-        let s1 = m1.len();
-        let s2 = m2.len();
+        let (s1, s2) = comparer.sizes();
         self.size_comparison = Some(s1.cmp(&s2));
 
         if should_compare_content && s1 == s2 {
@@ -234,9 +233,11 @@ mod tests {
         let f2_path = dir2.path().join("file");
         fs::write(&f1_path, content1)?;
         fs::write(&f2_path, content2)?;
+        let item1 = FileItem::try_from(f1_path.as_path())?;
+        let item2 = FileItem::try_from(f2_path.as_path())?;
 
         // Without hashers
-        let mut comparer = FileComparer::new(&f1_path, &f2_path);
+        let mut comparer = FileComparer::new(&item1, &item2);
         comparer.buffer_size = 8192;
         assert_eq!(comparer.compare_contents()?, expected);
 
