@@ -443,67 +443,71 @@ mod tests {
 
         // Create files in dir1
         let file1_path = dir1.path().join("same.txt");
-        let mut file1 = fs::File::create(&file1_path)?;
-        file1.write_all(b"same content")?;
+        fs::write(file1_path, b"same content")?;
 
         let only1_path = dir1.path().join("only1.txt");
-        let mut only1 = fs::File::create(&only1_path)?;
-        only1.write_all(b"only in dir1")?;
+        fs::write(only1_path, b"only in dir1")?;
 
         // Create files in dir2
         let file2_path = dir2.path().join("same.txt");
-        let mut file2 = fs::File::create(&file2_path)?;
-        file2.write_all(b"same content")?;
+        fs::write(file2_path, b"same content")?;
 
         let only2_path = dir2.path().join("only2.txt");
-        let mut only2 = fs::File::create(&only2_path)?;
-        only2.write_all(b"only in dir2")?;
+        fs::write(only2_path, b"only in dir2")?;
 
         // Create a different file
         let diff1_path = dir1.path().join("diff.txt");
-        let mut diff1 = fs::File::create(&diff1_path)?;
-        diff1.write_all(b"content 1")?;
-
+        fs::write(diff1_path, b"content 1")?;
         let diff2_path = dir2.path().join("diff.txt");
-        let mut diff2 = fs::File::create(&diff2_path)?;
-        diff2.write_all(b"content 222")?; // different length and content
+        fs::write(diff2_path, b"content 222")?; // different length and content
+
+        // Same size but different content.
+        let diffc1_path = dir1.path().join("diffc.txt");
+        fs::write(diffc1_path, b"content 111")?;
+        let diffc2_path = dir2.path().join("diffc.txt");
+        fs::write(diffc2_path, b"content 222")?; // different length and content
 
         let comparer = DirectoryComparer::new(dir1.path().to_path_buf(), dir2.path().to_path_buf());
         let (tx, rx) = mpsc::channel();
-
         comparer.compare_streaming_ordered(tx)?;
-
         let mut results = Vec::new();
         while let Ok(res) = rx.recv() {
             if let CompareProgress::Result(_, r) = res {
                 results.push(r);
             }
         }
-
         results.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
-
-        assert_eq!(results.len(), 4);
+        assert_eq!(results.len(), 5);
 
         // diff.txt
-        assert_eq!(results[0].relative_path.to_str().unwrap(), "diff.txt");
-        assert_eq!(results[0].classification, Classification::InBoth);
-        assert!(
-            results[0].is_content_same == Some(false)
-                || results[0].size_comparison != Some(Ordering::Equal)
-        );
+        let diff_result = &results[0];
+        assert_eq!(diff_result.relative_path.to_str().unwrap(), "diff.txt");
+        assert_eq!(diff_result.classification, Classification::InBoth);
+        assert_eq!(diff_result.size_comparison, Some(Ordering::Less));
+        assert_eq!(diff_result.is_content_same, None);
+
+        // diff2.txt
+        let diffc_result = &results[1];
+        assert_eq!(diffc_result.relative_path.to_str().unwrap(), "diffc.txt");
+        assert_eq!(diffc_result.classification, Classification::InBoth);
+        assert_eq!(diffc_result.size_comparison, Some(Ordering::Equal));
+        assert_eq!(diffc_result.is_content_same, Some(false));
 
         // only1.txt
-        assert_eq!(results[1].relative_path.to_str().unwrap(), "only1.txt");
-        assert_eq!(results[1].classification, Classification::OnlyInDir1);
+        let only1_result = &results[2];
+        assert_eq!(only1_result.relative_path.to_str().unwrap(), "only1.txt");
+        assert_eq!(only1_result.classification, Classification::OnlyInDir1);
 
         // only2.txt
-        assert_eq!(results[2].relative_path.to_str().unwrap(), "only2.txt");
-        assert_eq!(results[2].classification, Classification::OnlyInDir2);
+        let only2_result = &results[3];
+        assert_eq!(only2_result.relative_path.to_str().unwrap(), "only2.txt");
+        assert_eq!(only2_result.classification, Classification::OnlyInDir2);
 
         // same.txt
-        assert_eq!(results[3].relative_path.to_str().unwrap(), "same.txt");
-        assert_eq!(results[3].classification, Classification::InBoth);
-        assert_eq!(results[3].size_comparison, Some(Ordering::Equal));
+        let same_result = &results[4];
+        assert_eq!(same_result.relative_path.to_str().unwrap(), "same.txt");
+        assert_eq!(same_result.classification, Classification::InBoth);
+        assert_eq!(same_result.size_comparison, Some(Ordering::Equal));
 
         Ok(())
     }

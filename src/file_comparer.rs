@@ -46,6 +46,15 @@ impl<'a> FileComparer<'a> {
     }
 
     pub(crate) fn compare_contents(&self) -> anyhow::Result<bool> {
+        let len1 = self.file1.size();
+        let len2 = self.file2.size();
+        if len1 != len2 {
+            return Ok(false);
+        }
+        if len1 == 0 {
+            return Ok(true);
+        }
+
         if let Some((hasher1, hasher2)) = self.hashers {
             let (hash1, hash2) = rayon::join(
                 || hasher1.get_hash(self.file1.path()),
@@ -58,14 +67,6 @@ impl<'a> FileComparer<'a> {
         let mut f1 = fs::File::open(self.file1.path())?;
         let mut f2 = fs::File::open(self.file2.path())?;
         if self.buffer_size == 0 {
-            let len1 = self.file1.size();
-            let len2 = self.file2.size();
-            if len1 != len2 {
-                return Ok(false);
-            }
-            if len1 == 0 {
-                return Ok(true);
-            }
             let mmap1 = unsafe { memmap2::MmapOptions::new().map(&f1)? };
             let mmap2 = unsafe { memmap2::MmapOptions::new().map(&f2)? };
             let result = mmap1[..] == mmap2[..];
