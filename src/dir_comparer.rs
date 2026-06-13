@@ -1,10 +1,9 @@
 use crate::{
-    Classification, ColumnFormatter, FileComparer, FileComparisonResult, FileHasher, FileIterator,
-    OutputFormat, Progress, ProgressBuilder,
+    Classification, ColumnFormatter, FileComparer, FileComparisonResult, FileHasher, FileItem,
+    FileIterator, OutputFormat, Progress, ProgressBuilder,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
-use simple_path::SimplePath;
 use std::{
     cmp::Ordering,
     io::{self, stdout},
@@ -179,9 +178,9 @@ impl DirectoryComparer {
                 tx.send(CompareProgress::StartOfComparison)?;
                 loop {
                     let cmp = match (&cur1, &cur2) {
-                        (Some(p1), Some(p2)) => {
-                            let rel1 = SimplePath::strip_prefix(p1, &self.dir1).unwrap();
-                            let rel2 = SimplePath::strip_prefix(p2, &self.dir2).unwrap();
+                        (Some(f1), Some(f2)) => {
+                            let rel1 = f1.relative_path(&self.dir1);
+                            let rel2 = f2.relative_path(&self.dir2);
                             rel1.cmp(rel2)
                         }
                         (Some(_), None) => Ordering::Less,
@@ -190,8 +189,8 @@ impl DirectoryComparer {
                     };
                     match cmp {
                         Ordering::Less => {
-                            let path1 = cur1.take().unwrap();
-                            let rel1 = SimplePath::strip_prefix(&path1, &self.dir1).unwrap();
+                            let file1 = cur1.take().unwrap();
+                            let rel1 = file1.relative_path(&self.dir1);
                             let result =
                                 FileComparisonResult::new(rel1.into(), Classification::OnlyInDir1);
                             tx.send(CompareProgress::Result(index, result))?;
@@ -200,8 +199,8 @@ impl DirectoryComparer {
                             cur1 = it1_rx.recv().ok();
                         }
                         Ordering::Greater => {
-                            let path2 = cur2.take().unwrap();
-                            let rel2 = SimplePath::strip_prefix(&path2, &self.dir2).unwrap();
+                            let file2 = cur2.take().unwrap();
+                            let rel2 = file2.relative_path(&self.dir2);
                             let result =
                                 FileComparisonResult::new(rel2.into(), Classification::OnlyInDir2);
                             tx.send(CompareProgress::Result(index, result))?;
@@ -210,21 +209,20 @@ impl DirectoryComparer {
                             cur2 = it2_rx.recv().ok();
                         }
                         Ordering::Equal => {
-                            let path1 = cur1.take().unwrap();
-                            let path2 = cur2.take().unwrap();
+                            let file1 = cur1.take().unwrap();
+                            let file2 = cur2.take().unwrap();
                             let buffer_size = self.buffer_size;
                             let tx_clone = tx.clone();
                             let i = index;
                             let should_compare =
                                 self.comparison_method != FileComparisonMethod::Size;
                             scope.spawn(move |_| {
-                                let mut comparer = FileComparer::new(&path1, &path2);
+                                let mut comparer = FileComparer::new(&file1, &file2);
                                 comparer.buffer_size = buffer_size;
                                 if let Some((h1, h2)) = hashers_ref {
                                     comparer.hashers = Some((h1, h2));
                                 }
-                                let rel_path =
-                                    SimplePath::strip_prefix(&path1, &self.dir1).unwrap();
+                                let rel_path = file1.relative_path(&self.dir1);
                                 let mut result = FileComparisonResult::new(
                                     rel_path.into(),
                                     Classification::InBoth,
@@ -297,35 +295,36 @@ impl DirectoryComparer {
 
     fn run_file_comparer(&self) -> anyhow::Result<()> {
         assert!(self.dir1.is_file());
-        let file1 = &self.dir1;
-        let dir1 = file1.parent().unwrap();
-        let file1_name = file1.file_name().unwrap();
-        let (dir2, file2) = if self.dir2.is_file() {
+        let file1_path = &self.dir1;
+        let dir1 = file1_path.parent().unwrap();
+        let file1_name = file1_path.file_name().unwrap();
+        let (dir2, file2_path) = if self.dir2.is_file() {
             (self.dir2.parent().unwrap(), self.dir2.clone())
         } else {
             (self.dir2.as_path(), self.dir2.join(file1_name))
         };
-
-        let mut comparer = FileComparer::new(file1, &file2);
+        let file1 = FileItem::try_from(file1_path.as_path())?;
+        let file2 = FileItem::try_from(file2_path.as_path())?;
+        let mut comparer = FileComparer::new(&file1, &file2);
         comparer.buffer_size = self.buffer_size;
         let mut hashers = self.get_hashers(dir1, dir2)?;
         if let Some((h1, h2)) = &mut hashers {
             if self.comparison_method == FileComparisonMethod::Rehash {
-                h1.remove_cache_entry(file1)?;
-                h2.remove_cache_entry(&file2)?;
+                h1.remove_cache_entry(file1_path)?;
+                h2.remove_cache_entry(&file2_path)?;
             }
             comparer.hashers = Some((h1, h2));
         }
         let mut result = FileComparisonResult::new(PathBuf::new(), Classification::InBoth);
         let should_compare_content = self.comparison_method != FileComparisonMethod::Size;
         result.update(&comparer, should_compare_content)?;
-        let file1_str = file1.to_str().unwrap_or("file1");
+        let file1_str = file1_path.to_str().unwrap_or("file1");
         match self.output_format {
             OutputFormat::Symbol => {
                 println!("{} {}", result.to_symbol_string(), file1_str);
             }
             OutputFormat::Default => {
-                let file2_str = file2.to_str().unwrap_or("file2");
+                let file2_str = file2_path.to_str().unwrap_or("file2");
                 println!("{}: {}", file1_str, result.to_string(file1_str, file2_str));
             }
             _ => unreachable!(),
