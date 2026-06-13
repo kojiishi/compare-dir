@@ -31,7 +31,6 @@ enum DupEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum CheckStatus {
-    Unchanged,
     New,
     Modified,
 }
@@ -181,7 +180,6 @@ impl FileHasher {
                                 num_modified += 1;
                                 '!'
                             }
-                            CheckStatus::Unchanged => unreachable!(),
                         };
                         progress.inc(1);
                         progress.suspend_for(stdout(), || {
@@ -248,20 +246,11 @@ impl FileHasher {
                     let tx = tx.clone();
                     let cache = Arc::clone(&cache);
                     scope.spawn(move |_| {
-                        let status = self.check_file(&file, &cache, update);
-                        let event = match status {
-                            Ok(CheckStatus::New) | Ok(CheckStatus::Modified) => {
-                                let rel_path = file.relative_path(base_dir);
-                                CheckEvent::Result(rel_path.into(), status.unwrap())
+                        if let Err(error) = self.check_file(&file, cache, update, &tx) {
+                            log::error!("Failed to check file '{}': {}", file, error);
+                            if tx.send(CheckEvent::Error).is_err() {
+                                log::error!("Send failed");
                             }
-                            Ok(CheckStatus::Unchanged) => CheckEvent::FileDone,
-                            Err(e) => {
-                                log::error!("Failed to check file '{}': {}", file, e);
-                                CheckEvent::Error
-                            }
-                        };
-                        if tx.send(event).is_err() {
-                            log::error!("Send failed");
                         }
                     });
                 }
@@ -276,41 +265,40 @@ impl FileHasher {
     fn check_file(
         &self,
         file: &FileItem,
-        cache: &FileHashCache,
+        cache: Arc<FileHashCache>,
         update: bool,
-    ) -> anyhow::Result<CheckStatus> {
+        tx: &mpsc::Sender<CheckEvent>,
+    ) -> anyhow::Result<()> {
         assert!(file.path().is_absolute());
         let path_in_cache = file.relative_path(cache.base_dir());
-        let cached_hash = cache.get_by_path(path_in_cache);
-        let (status, hash) = match cached_hash {
+        match cache.get_by_path(path_in_cache) {
             Some(cached_hash) => {
                 let hash = self.compute_hash(file)?;
                 if hash != cached_hash {
-                    (CheckStatus::Modified, Some(hash))
+                    if update {
+                        cache.insert(path_in_cache, file.modified(), hash);
+                    }
+                    let base_dir = &self.dirs[0];
+                    let rel_path = file.relative_path(base_dir);
+                    tx.send(CheckEvent::Result(rel_path.into(), CheckStatus::Modified))?;
                 } else {
-                    (CheckStatus::Unchanged, Some(hash))
+                    if update && cache.get(path_in_cache, file.modified()).is_none() {
+                        cache.insert(path_in_cache, file.modified(), hash);
+                    }
+                    tx.send(CheckEvent::FileDone)?;
                 }
             }
-            None => (CheckStatus::New, None),
-        };
-        if update {
-            let hash = match hash {
-                Some(hash) => hash,
-                None => self.compute_hash(file)?,
-            };
-            let modified = file.modified();
-            match status {
-                CheckStatus::New | CheckStatus::Modified => {
-                    cache.insert(path_in_cache, modified, hash);
+            None => {
+                if update {
+                    let hash = self.compute_hash(file)?;
+                    cache.insert(path_in_cache, file.modified(), hash);
                 }
-                CheckStatus::Unchanged => {
-                    if cache.get(path_in_cache, modified).is_none() {
-                        cache.insert(path_in_cache, modified, hash);
-                    }
-                }
+                let base_dir = &self.dirs[0];
+                let rel_path = file.relative_path(base_dir);
+                tx.send(CheckEvent::Result(rel_path.into(), CheckStatus::New))?;
             }
         }
-        Ok(status)
+        Ok(())
     }
 
     /// Executes the duplicate file finding process and prints results.
