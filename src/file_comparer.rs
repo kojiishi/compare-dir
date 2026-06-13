@@ -57,8 +57,8 @@ impl<'a> FileComparer<'a> {
 
         if let Some((hasher1, hasher2)) = self.hashers {
             let (hash1, hash2) = rayon::join(
-                || hasher1.get_hash(self.file1.path()),
-                || hasher2.get_hash(self.file2.path()),
+                || hasher1.get_hash(self.file1),
+                || hasher2.get_hash(self.file2),
             );
             return Ok(hash1? == hash2?);
         }
@@ -230,15 +230,15 @@ mod tests {
     fn check_compare(content1: &[u8], content2: &[u8], expected: bool) -> anyhow::Result<()> {
         let dir1 = tempfile::tempdir()?;
         let dir2 = tempfile::tempdir()?;
-        let f1_path = dir1.path().join("file");
-        let f2_path = dir2.path().join("file");
-        fs::write(&f1_path, content1)?;
-        fs::write(&f2_path, content2)?;
-        let item1 = FileItem::try_from(f1_path.as_path())?;
-        let item2 = FileItem::try_from(f2_path.as_path())?;
+        let file1_path = dir1.path().join("file");
+        let file2_path = dir2.path().join("file");
+        fs::write(&file1_path, content1)?;
+        fs::write(&file2_path, content2)?;
+        let file1 = FileItem::try_from(file1_path.as_path())?;
+        let file2 = FileItem::try_from(file2_path.as_path())?;
 
         // Without hashers
-        let mut comparer = FileComparer::new(&item1, &item2);
+        let mut comparer = FileComparer::new(&file1, &file2);
         comparer.buffer_size = 8192;
         assert_eq!(comparer.compare_contents()?, expected);
 
