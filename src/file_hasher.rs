@@ -1,6 +1,6 @@
 use crate::{
     ColumnFormatter, DirectoryComparer, FileComparer, FileHashCache, FileItem, FileIterator,
-    OutputFormat, Progress, ProgressBuilder,
+    OutputFormat, Progress, ProgressBuilder, ProgressValue,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
@@ -24,7 +24,7 @@ type FileWithDirIndex = (FileItem, usize);
 #[derive(Debug, Clone)]
 enum DupEvent {
     StartHashing,
-    NumFiles(usize),
+    Total(ProgressValue),
     Result(FileItem, blake3::Hash),
     Error,
 }
@@ -35,13 +35,13 @@ enum CheckStatus {
     Modified,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 enum CheckEvent {
     StartChecking,
-    TotalFiles(usize),
-    Result(PathBuf, CheckStatus),
-    FileDone,
-    Error,
+    Total(ProgressValue),
+    Result(PathBuf, CheckStatus, ProgressValue),
+    Progress(ProgressValue),
+    Error(FileItem),
 }
 
 enum DupState {
@@ -145,11 +145,12 @@ impl FileHasher {
             anyhow::bail!("Check mode only supports one directory.");
         }
         let start_time = time::Instant::now();
-        let progress = self
+        let mut progress = self
             .progress
             .as_ref()
             .map(|progress| progress.add_spinner())
             .unwrap_or_else(Progress::none);
+        progress.use_bytes();
         progress.set_message("Scanning directory...");
         let mut num_new = 0;
         let mut num_modified = 0;
@@ -166,11 +167,11 @@ impl FileHasher {
                     CheckEvent::StartChecking => {
                         progress.set_message("Checking files...");
                     }
-                    CheckEvent::TotalFiles(total) => {
-                        progress.set_length(total as u64);
+                    CheckEvent::Total(value) => {
+                        progress.set_length(value);
                         progress.set_message("");
                     }
-                    CheckEvent::Result(path, status) => {
+                    CheckEvent::Result(path, status, value) => {
                         let symbol = match status {
                             CheckStatus::New => {
                                 num_new += 1;
@@ -181,16 +182,16 @@ impl FileHasher {
                                 '!'
                             }
                         };
-                        progress.inc(1);
+                        progress.inc(value);
                         progress.suspend_for(stdout(), || {
                             println!("{} {}", symbol, path.display());
                         });
                     }
-                    CheckEvent::FileDone => {
-                        progress.inc(1);
+                    CheckEvent::Progress(value) => {
+                        progress.inc(value);
                     }
-                    CheckEvent::Error => {
-                        progress.inc(1);
+                    CheckEvent::Error(file) => {
+                        progress.inc(ProgressValue::with_skip(file.size()));
                         num_error += 1;
                     }
                 }
@@ -240,21 +241,11 @@ impl FileHasher {
             tx.send(CheckEvent::StartChecking)?;
             let pool = crate::build_thread_pool(self.jobs)?;
             pool.scope(move |scope| -> anyhow::Result<()> {
-                let mut total_files = 0;
+                let mut total = ProgressValue::default();
                 for file in it_rx {
-                    total_files += 1;
-                    let tx = tx.clone();
-                    let cache = Arc::clone(&cache);
-                    scope.spawn(move |_| {
-                        if let Err(error) = self.check_file(&file, cache, update, &tx) {
-                            log::error!("Failed to check file '{}': {}", file, error);
-                            if tx.send(CheckEvent::Error).is_err() {
-                                log::error!("Send failed");
-                            }
-                        }
-                    });
+                    self.check_file(file, &cache, update, &mut total, &tx, scope);
                 }
-                tx.send(CheckEvent::TotalFiles(total_files))?;
+                tx.send(CheckEvent::Total(total))?;
                 Ok(())
             })
         })?;
@@ -262,7 +253,29 @@ impl FileHasher {
         Ok(())
     }
 
-    fn check_file(
+    fn check_file<'scope>(
+        &'scope self,
+        file: FileItem,
+        cache: &Arc<FileHashCache>,
+        update: bool,
+        total: &mut ProgressValue,
+        tx: &mpsc::Sender<CheckEvent>,
+        scope: &rayon::Scope<'scope>,
+    ) {
+        *total += ProgressValue::with_size(file.size());
+        let tx = tx.clone();
+        let cache = Arc::clone(cache);
+        scope.spawn(move |_| {
+            if let Err(error) = self._check_file(&file, cache, update, &tx) {
+                log::error!("Failed to check file '{}': {}", file, error);
+                if tx.send(CheckEvent::Error(file)).is_err() {
+                    log::error!("Send failed");
+                }
+            }
+        });
+    }
+
+    fn _check_file(
         &self,
         file: &FileItem,
         cache: Arc<FileHashCache>,
@@ -276,7 +289,11 @@ impl FileHasher {
                 if !update && cached.size != 0 && file.size() != cached.size {
                     let base_dir = &self.dirs[0];
                     let rel_path = file.relative_path(base_dir);
-                    tx.send(CheckEvent::Result(rel_path.into(), CheckStatus::Modified))?;
+                    tx.send(CheckEvent::Result(
+                        rel_path.into(),
+                        CheckStatus::Modified,
+                        ProgressValue::with_skip(file.size()),
+                    ))?;
                     return Ok(());
                 }
                 let hash = self.compute_hash(file)?;
@@ -286,12 +303,16 @@ impl FileHasher {
                     }
                     let base_dir = &self.dirs[0];
                     let rel_path = file.relative_path(base_dir);
-                    tx.send(CheckEvent::Result(rel_path.into(), CheckStatus::Modified))?;
+                    tx.send(CheckEvent::Result(
+                        rel_path.into(),
+                        CheckStatus::Modified,
+                        ProgressValue::with_size(file.size()),
+                    ))?;
                 } else {
                     if update && !cached.eq(file) {
                         cache.insert(path_in_cache, file, hash);
                     }
-                    tx.send(CheckEvent::FileDone)?;
+                    tx.send(CheckEvent::Progress(ProgressValue::with_size(file.size())))?;
                 }
             }
             None => {
@@ -301,7 +322,11 @@ impl FileHasher {
                 }
                 let base_dir = &self.dirs[0];
                 let rel_path = file.relative_path(base_dir);
-                tx.send(CheckEvent::Result(rel_path.into(), CheckStatus::New))?;
+                tx.send(CheckEvent::Result(
+                    rel_path.into(),
+                    CheckStatus::New,
+                    ProgressValue::with_size(file.size()),
+                ))?;
             }
         }
         Ok(())
@@ -348,7 +373,7 @@ impl FileHasher {
 
     /// Finds duplicated files and returns a list of duplicate groups.
     pub fn find_duplicates(&self) -> anyhow::Result<Vec<DuplicatedFiles>> {
-        let progress = self
+        let mut progress = self
             .progress
             .as_ref()
             .map(|progress| progress.add_spinner())
@@ -367,9 +392,9 @@ impl FileHasher {
             while let Ok(event) = rx.recv() {
                 match event {
                     DupEvent::StartHashing => progress.set_message("Hashing files..."),
-                    DupEvent::NumFiles(num) => progress.set_length(num as u64),
+                    DupEvent::Total(value) => progress.set_length(value),
                     DupEvent::Result(file, hash) => {
-                        progress.inc(1);
+                        progress.inc(ProgressValue::with_size(file.size()));
                         let entry = by_hash.entry(hash).or_insert_with(|| DuplicatedFiles {
                             paths: Vec::new(),
                             size: file.size(),
@@ -382,7 +407,7 @@ impl FileHasher {
                         );
                         entry.paths.push(file.into_path_buf());
                     }
-                    DupEvent::Error => progress.inc(1),
+                    DupEvent::Error => {}
                 }
             }
         });
@@ -405,7 +430,7 @@ impl FileHasher {
             let pool = crate::build_thread_pool(self.jobs)?;
             pool.scope(move |scope| -> anyhow::Result<()> {
                 let mut by_size: HashMap<u64, DupState> = HashMap::new();
-                let mut num_hashed = 0;
+                let mut total = ProgressValue::default();
                 tx.send(DupEvent::StartHashing)?;
                 for (file, dir_index) in it_rx {
                     let size = file.size();
@@ -422,15 +447,16 @@ impl FileHasher {
                                 let cache0 = &caches[*dir_index0];
                                 self.send_hash(file0, cache0, &tx, scope);
                                 self.send_hash(&file, cache, &tx, scope);
+                                total += ProgressValue::with_size(file0.size());
+                                total += ProgressValue::with_size(file.size());
 
                                 // Modify the state to indicate we are now fully hashing this size bucket.
                                 *occ.get_mut() = DupState::Hashing;
-                                num_hashed += 2;
                             }
                             DupState::Hashing => {
                                 // File size bucket already hashing; just dynamically spawn the new file immediately.
                                 self.send_hash(&file, cache, &tx, scope);
-                                num_hashed += 1;
+                                total += ProgressValue::with_size(file.size());
                             }
                         },
                         std::collections::hash_map::Entry::Vacant(vac) => {
@@ -438,7 +464,7 @@ impl FileHasher {
                         }
                     }
                 }
-                tx.send(DupEvent::NumFiles(num_hashed))?;
+                tx.send(DupEvent::Total(total))?;
                 Ok(())
             })?;
             pool.install(|| caches.into_par_iter().try_for_each(|cache| cache.save()))?;
@@ -524,7 +550,7 @@ impl FileHasher {
     fn compute_hash(&self, file: &FileItem) -> io::Result<blake3::Hash> {
         let start_time = time::Instant::now();
         let mut f = fs::File::open(file.path())?;
-        let progress = self
+        let mut progress = self
             .progress
             .as_ref()
             .map(|progress| progress.add_file(file.path(), file.size()))
@@ -534,7 +560,7 @@ impl FileHasher {
             if file.size() > 0 {
                 let mmap = unsafe { memmap2::MmapOptions::new().map(&f)? };
                 hasher.update(&mmap[..]);
-                progress.inc(file.size());
+                progress.inc(ProgressValue::with_size(file.size()));
             }
         } else {
             let mut buf = vec![0u8; self.buffer_size];
@@ -544,7 +570,7 @@ impl FileHasher {
                     break;
                 }
                 hasher.update(&buf[..n]);
-                progress.inc(n as u64);
+                progress.inc(ProgressValue::with_size(n as u64));
             }
         }
         progress.finish();
@@ -783,10 +809,10 @@ mod tests {
         while let Ok(event) = rx.recv() {
             match event {
                 CheckEvent::StartChecking => start_seen = true,
-                CheckEvent::TotalFiles(total) => total_files = Some(total),
-                CheckEvent::Result(path, status) => results.push((path, status)),
-                CheckEvent::FileDone => file_done_count += 1,
-                CheckEvent::Error => num_error += 1,
+                CheckEvent::Total(total) => total_files = Some(total.num_files),
+                CheckEvent::Result(path, status, _size) => results.push((path, status)),
+                CheckEvent::Progress(progress_val) => file_done_count += progress_val.num_files,
+                CheckEvent::Error(_) => num_error += 1,
             }
         }
         assert!(start_seen);
@@ -829,8 +855,8 @@ mod tests {
         let mut file_done_count = 0;
         while let Ok(event) = rx.recv() {
             match event {
-                CheckEvent::Result(path, status) => results.push((path, status)),
-                CheckEvent::FileDone => file_done_count += 1,
+                CheckEvent::Result(path, status, _size) => results.push((path, status)),
+                CheckEvent::Progress(progress_val) => file_done_count += progress_val.num_files,
                 _ => {}
             }
         }
@@ -855,8 +881,8 @@ mod tests {
         let mut file_done_count = 0;
         while let Ok(event) = rx.recv() {
             match event {
-                CheckEvent::Result(path, status) => results.push((path, status)),
-                CheckEvent::FileDone => file_done_count += 1,
+                CheckEvent::Result(path, status, _size) => results.push((path, status)),
+                CheckEvent::Progress(progress_val) => file_done_count += progress_val.num_files,
                 _ => {}
             }
         }
