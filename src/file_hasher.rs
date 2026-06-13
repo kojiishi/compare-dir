@@ -280,28 +280,32 @@ impl FileHasher {
         update: bool,
     ) -> anyhow::Result<CheckStatus> {
         assert!(file.path().is_absolute());
-        let computed_hash = self.compute_hash(file)?;
-        let rel_path = file.relative_path(cache.base_dir());
-        let cached_hash = cache.get_by_path(rel_path);
-        let status = match cached_hash {
-            None => CheckStatus::New,
-            Some(cached) => {
-                if computed_hash != cached {
-                    CheckStatus::Modified
+        let path_in_cache = file.relative_path(cache.base_dir());
+        let cached_hash = cache.get_by_path(path_in_cache);
+        let (status, hash) = match cached_hash {
+            Some(cached_hash) => {
+                let hash = self.compute_hash(file)?;
+                if hash != cached_hash {
+                    (CheckStatus::Modified, Some(hash))
                 } else {
-                    CheckStatus::Unchanged
+                    (CheckStatus::Unchanged, Some(hash))
                 }
             }
+            None => (CheckStatus::New, None),
         };
         if update {
+            let hash = match hash {
+                Some(hash) => hash,
+                None => self.compute_hash(file)?,
+            };
             let modified = file.modified();
             match status {
                 CheckStatus::New | CheckStatus::Modified => {
-                    cache.insert(rel_path, modified, computed_hash);
+                    cache.insert(path_in_cache, modified, hash);
                 }
                 CheckStatus::Unchanged => {
-                    if cache.get(rel_path, modified).is_none() {
-                        cache.insert(rel_path, modified, computed_hash);
+                    if cache.get(path_in_cache, modified).is_none() {
+                        cache.insert(path_in_cache, modified, hash);
                     }
                 }
             }
