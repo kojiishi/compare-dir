@@ -498,12 +498,7 @@ impl FileHasher {
     }
 
     /// Gets the hash of a file, using the cache if available.
-    pub fn get_hash(&self, path: &Path) -> anyhow::Result<blake3::Hash> {
-        let file = FileItem::try_from(path)?;
-        self._get_hash(&file)
-    }
-
-    fn _get_hash(&self, file: &FileItem) -> anyhow::Result<blake3::Hash> {
+    pub fn get_hash(&self, file: &FileItem) -> anyhow::Result<blake3::Hash> {
         let cache = self.cache.as_ref().expect("cache should be initialized");
         let (hash, relative) = self.get_hash_from_cache(file, cache)?;
         if let Some(hash) = hash {
@@ -818,11 +813,13 @@ mod tests {
         let file2_path = dir.path().join("file2.txt");
         fs::write(&file1_path, "content 1")?;
         fs::write(&file2_path, "content 2")?;
+        let file1 = FileItem::try_from(file1_path.as_path())?;
+        let file2 = FileItem::try_from(file2_path.as_path())?;
 
         let mut hasher = FileHasher::new_with_cache(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
-        let _hash1 = hasher.get_hash(&file1_path)?;
-        let _hash2 = hasher.get_hash(&file2_path)?;
+        let _hash1 = hasher.get_hash(&file1)?;
+        let _hash2 = hasher.get_hash(&file2)?;
         hasher.save_cache()?;
         assert!(dir.path().join(FileHashCache::FILE_NAME).exists());
 
