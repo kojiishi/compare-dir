@@ -280,7 +280,7 @@ impl FileHasher {
         update: bool,
     ) -> anyhow::Result<CheckStatus> {
         assert!(file.path().is_absolute());
-        let computed_hash = self.compute_hash(file.path())?;
+        let computed_hash = self.compute_hash(file)?;
         let rel_path = file.relative_path(cache.base_dir());
         let cached_hash = cache.get_by_path(rel_path);
         let status = match cached_hash {
@@ -487,7 +487,7 @@ impl FileHasher {
         let tx = tx.clone();
         let cache = Arc::clone(cache);
         scope.spawn(move |_| {
-            if let Ok(hash) = self.compute_hash(file.path()) {
+            if let Ok(hash) = self.compute_hash(&file) {
                 cache.insert(&relative, file.modified(), hash);
                 let _ = tx.send(DupEvent::Result(file, hash));
             } else {
@@ -510,7 +510,7 @@ impl FileHasher {
             return Ok(hash);
         }
 
-        let hash = self.compute_hash(file.path())?;
+        let hash = self.compute_hash(file)?;
         cache.insert(relative, file.modified(), hash);
         Ok(hash)
     }
@@ -528,21 +528,20 @@ impl FileHasher {
         Ok((None, relative))
     }
 
-    fn compute_hash(&self, path: &Path) -> io::Result<blake3::Hash> {
+    fn compute_hash(&self, file: &FileItem) -> io::Result<blake3::Hash> {
         let start_time = time::Instant::now();
-        let mut f = fs::File::open(path)?;
-        let len = f.metadata()?.len();
+        let mut f = fs::File::open(file.path())?;
         let progress = self
             .progress
             .as_ref()
-            .map(|progress| progress.add_file(path, len))
+            .map(|progress| progress.add_file(file.path(), file.size()))
             .unwrap_or_else(Progress::none);
         let mut hasher = blake3::Hasher::new();
         if self.buffer_size == 0 {
-            if len > 0 {
+            if file.size() > 0 {
                 let mmap = unsafe { memmap2::MmapOptions::new().map(&f)? };
                 hasher.update(&mmap[..]);
-                progress.inc(len);
+                progress.inc(file.size());
             }
         } else {
             let mut buf = vec![0u8; self.buffer_size];
@@ -561,7 +560,7 @@ impl FileHasher {
         log::debug!(
             "Computed hash in {}: '{}'",
             FormattedDuration(start_time.elapsed()),
-            path.display()
+            file
         );
         Ok(hash)
     }
