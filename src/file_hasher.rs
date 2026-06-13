@@ -276,14 +276,14 @@ impl FileHasher {
                 let hash = self.compute_hash(file)?;
                 if hash != cached_hash {
                     if update {
-                        cache.insert(path_in_cache, file.modified(), hash);
+                        cache.insert(path_in_cache, file, hash);
                     }
                     let base_dir = &self.dirs[0];
                     let rel_path = file.relative_path(base_dir);
                     tx.send(CheckEvent::Result(rel_path.into(), CheckStatus::Modified))?;
                 } else {
-                    if update && cache.get(path_in_cache, file.modified()).is_none() {
-                        cache.insert(path_in_cache, file.modified(), hash);
+                    if update && cache.get(path_in_cache, file).is_none() {
+                        cache.insert(path_in_cache, file, hash);
                     }
                     tx.send(CheckEvent::FileDone)?;
                 }
@@ -291,7 +291,7 @@ impl FileHasher {
             None => {
                 if update {
                     let hash = self.compute_hash(file)?;
-                    cache.insert(path_in_cache, file.modified(), hash);
+                    cache.insert(path_in_cache, file, hash);
                 }
                 let base_dir = &self.dirs[0];
                 let rel_path = file.relative_path(base_dir);
@@ -480,7 +480,7 @@ impl FileHasher {
         let cache = Arc::clone(cache);
         scope.spawn(move |_| {
             if let Ok(hash) = self.compute_hash(&file) {
-                cache.insert(&relative, file.modified(), hash);
+                cache.insert(&relative, &file, hash);
                 let _ = tx.send(DupEvent::Result(file, hash));
             } else {
                 log::error!("Failed to hash file: '{}'", file);
@@ -498,7 +498,7 @@ impl FileHasher {
         }
 
         let hash = self.compute_hash(file)?;
-        cache.insert(relative, file.modified(), hash);
+        cache.insert(relative, file, hash);
         Ok(hash)
     }
 
@@ -508,7 +508,7 @@ impl FileHasher {
         cache: &FileHashCache,
     ) -> io::Result<(Option<blake3::Hash>, &'a Path)> {
         let relative = file.relative_path(cache.base_dir());
-        if let Some(hash) = cache.get(relative, file.modified()) {
+        if let Some(hash) = cache.get(relative, file) {
             self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
             return Ok((Some(hash), relative));
         }
@@ -879,13 +879,13 @@ mod tests {
         assert!(dir.path().join(FileHashCache::FILE_NAME).exists());
 
         let cache = FileHashCache::new(&dir_path);
-        let mtime1 = fs::metadata(&file1_path)?.modified()?;
-        let hash1 = cache.get(&PathBuf::from("file1.txt"), mtime1);
+        let file1 = FileItem::try_from(file1_path.as_path())?;
+        let hash1 = cache.get(&PathBuf::from("file1.txt"), &file1);
         assert!(hash1.is_some());
 
         std::thread::sleep(time::Duration::from_millis(10));
         fs::write(&file1_path, "content 1 modified")?;
-        let mtime1_mod = fs::metadata(&file1_path)?.modified()?;
+        let file1_mod = FileItem::try_from(file1_path.as_path())?;
 
         let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
@@ -895,18 +895,18 @@ mod tests {
         hasher.save_cache()?;
 
         let cache = FileHashCache::new(&dir_path);
-        let hash_mod = cache.get(&PathBuf::from("file1.txt"), mtime1_mod);
+        let hash_mod = cache.get(&PathBuf::from("file1.txt"), &file1_mod);
         assert!(hash_mod.is_some());
         assert_ne!(hash1, hash_mod);
 
         std::thread::sleep(time::Duration::from_millis(10));
         fs::write(&file1_path, "content 1 modified")?;
-        let mtime1_mod2 = fs::metadata(&file1_path)?.modified()?;
-        assert!(mtime1_mod2 > mtime1_mod);
+        let file1_mod2 = FileItem::try_from(file1_path.as_path())?;
+        assert!(file1_mod2.modified() > file1_mod.modified());
 
         assert!(
             cache
-                .get(&PathBuf::from("file1.txt"), mtime1_mod2)
+                .get(&PathBuf::from("file1.txt"), &file1_mod2)
                 .is_none()
         );
 
@@ -920,7 +920,7 @@ mod tests {
         let cache = FileHashCache::new(&dir_path);
         assert!(
             cache
-                .get(&PathBuf::from("file1.txt"), mtime1_mod2)
+                .get(&PathBuf::from("file1.txt"), &file1_mod2)
                 .is_some()
         );
         Ok(())
@@ -934,8 +934,8 @@ mod tests {
         let file2_path = dir.path().join("file2.txt");
         fs::write(&file1_path, "content 1")?;
         fs::write(&file2_path, "content 2")?;
-        let mtime1 = fs::metadata(&file1_path)?.modified()?;
-        let mtime2 = fs::metadata(&file2_path)?.modified()?;
+        let file1 = FileItem::try_from(file1_path.as_path())?;
+        let file2 = FileItem::try_from(file2_path.as_path())?;
 
         let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
@@ -946,8 +946,8 @@ mod tests {
 
         // Verify both are in the cache
         let cache = FileHashCache::new(&dir_path);
-        assert!(cache.get(&PathBuf::from("file1.txt"), mtime1).is_some());
-        assert!(cache.get(&PathBuf::from("file2.txt"), mtime2).is_some());
+        assert!(cache.get(&PathBuf::from("file1.txt"), &file1).is_some());
+        assert!(cache.get(&PathBuf::from("file2.txt"), &file2).is_some());
 
         // Now delete file2 from disk
         fs::remove_file(&file2_path)?;
@@ -962,8 +962,8 @@ mod tests {
 
         // Verify file2 is removed from cache, but file1 is still there
         let cache = FileHashCache::new(&dir_path);
-        assert!(cache.get(&PathBuf::from("file2.txt"), mtime2).is_none());
-        assert!(cache.get(&PathBuf::from("file1.txt"), mtime1).is_some());
+        assert!(cache.get(&PathBuf::from("file2.txt"), &file2).is_none());
+        assert!(cache.get(&PathBuf::from("file1.txt"), &file1).is_some());
         Ok(())
     }
 
