@@ -271,10 +271,16 @@ impl FileHasher {
     ) -> anyhow::Result<()> {
         assert!(file.path().is_absolute());
         let path_in_cache = file.relative_path(cache.base_dir());
-        match cache.get_by_path(path_in_cache) {
-            Some(cached_hash) => {
+        match cache.get_entry(path_in_cache) {
+            Some(cached) => {
+                if !update && file.size() != cached.size {
+                    let base_dir = &self.dirs[0];
+                    let rel_path = file.relative_path(base_dir);
+                    tx.send(CheckEvent::Result(rel_path.into(), CheckStatus::Modified))?;
+                    return Ok(());
+                }
                 let hash = self.compute_hash(file)?;
-                if hash != cached_hash {
+                if hash != cached.hash {
                     if update {
                         cache.insert(path_in_cache, file, hash);
                     }
@@ -282,7 +288,7 @@ impl FileHasher {
                     let rel_path = file.relative_path(base_dir);
                     tx.send(CheckEvent::Result(rel_path.into(), CheckStatus::Modified))?;
                 } else {
-                    if update && cache.get(path_in_cache, file).is_none() {
+                    if update && !cached.eq(file) {
                         cache.insert(path_in_cache, file, hash);
                     }
                     tx.send(CheckEvent::FileDone)?;
