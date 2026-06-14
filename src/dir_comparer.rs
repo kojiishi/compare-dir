@@ -1,6 +1,6 @@
 use crate::{
     Classification, ColumnFormatter, FileComparer, FileComparisonResult, FileHasher, FileItem,
-    FileIterator, OutputFormat, Progress, ProgressBuilder,
+    FileIterator, OutputFormat, Progress, ProgressBuilder, ProgressValue,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
@@ -15,8 +15,8 @@ use std::{
 #[derive(Debug, Clone)]
 enum CompareProgress {
     StartOfComparison,
-    FileDone,
-    TotalFiles(usize),
+    Progress(ProgressValue),
+    Total(ProgressValue),
     Result(usize, FileComparisonResult),
     Error,
 }
@@ -74,7 +74,7 @@ impl DirectoryComparer {
             return self.run_file_comparer();
         }
 
-        let progress = self
+        let mut progress = self
             .progress
             .as_ref()
             .map(|progress| progress.add_spinner())
@@ -98,8 +98,8 @@ impl DirectoryComparer {
                     CompareProgress::StartOfComparison => {
                         progress.set_message("Comparing files...");
                     }
-                    CompareProgress::TotalFiles(total_files) => {
-                        progress.set_length(total_files as u64);
+                    CompareProgress::Total(total) => {
+                        progress.set_length(total);
                         progress.set_message("");
                     }
                     CompareProgress::Result(_, result) => {
@@ -126,7 +126,7 @@ impl DirectoryComparer {
                             _ => unreachable!(),
                         }
                     }
-                    CompareProgress::FileDone => progress.inc(1),
+                    CompareProgress::Progress(value) => progress.inc(value),
                     CompareProgress::Error => summary.num_errors += 1,
                 }
             }
@@ -175,6 +175,7 @@ impl DirectoryComparer {
                 let mut cur1 = it1_rx.recv().ok();
                 let mut cur2 = it2_rx.recv().ok();
                 let mut index = 0;
+                let mut total = ProgressValue::default();
                 tx.send(CompareProgress::StartOfComparison)?;
                 loop {
                     let cmp = match (&cur1, &cur2) {
@@ -191,20 +192,24 @@ impl DirectoryComparer {
                         Ordering::Less => {
                             let file1 = cur1.take().unwrap();
                             let rel1 = file1.relative_path(&self.dir1);
+                            let size = file1.size();
+                            total += ProgressValue::with_size(size);
                             let result =
                                 FileComparisonResult::new(rel1.into(), Classification::OnlyInDir1);
                             tx.send(CompareProgress::Result(index, result))?;
-                            tx.send(CompareProgress::FileDone)?;
+                            tx.send(CompareProgress::Progress(ProgressValue::with_size(size)))?;
                             index += 1;
                             cur1 = it1_rx.recv().ok();
                         }
                         Ordering::Greater => {
                             let file2 = cur2.take().unwrap();
                             let rel2 = file2.relative_path(&self.dir2);
+                            let size = file2.size();
+                            total += ProgressValue::with_size(size);
                             let result =
                                 FileComparisonResult::new(rel2.into(), Classification::OnlyInDir2);
                             tx.send(CompareProgress::Result(index, result))?;
-                            tx.send(CompareProgress::FileDone)?;
+                            tx.send(CompareProgress::Progress(ProgressValue::with_size(size)))?;
                             index += 1;
                             cur2 = it2_rx.recv().ok();
                         }
@@ -216,6 +221,8 @@ impl DirectoryComparer {
                             let i = index;
                             let should_compare =
                                 self.comparison_method != FileComparisonMethod::Size;
+                            let size = file1.size();
+                            total += ProgressValue::with_size(size);
                             scope.spawn(move |_| {
                                 let mut comparer = FileComparer::new(&file1, &file2);
                                 comparer.buffer_size = buffer_size;
@@ -239,7 +246,11 @@ impl DirectoryComparer {
                                     }
                                 };
                                 if tx_clone.send(event).is_err()
-                                    || tx_clone.send(CompareProgress::FileDone).is_err()
+                                    || tx_clone
+                                        .send(CompareProgress::Progress(ProgressValue::with_size(
+                                            size,
+                                        )))
+                                        .is_err()
                                 {
                                     log::error!("Send failed");
                                 }
@@ -250,7 +261,7 @@ impl DirectoryComparer {
                         }
                     }
                 }
-                tx.send(CompareProgress::TotalFiles(index))
+                tx.send(CompareProgress::Total(total))
             })?;
             Ok::<(), anyhow::Error>(())
         })?;
