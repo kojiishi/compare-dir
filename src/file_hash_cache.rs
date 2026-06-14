@@ -43,6 +43,14 @@ impl CacheEntry {
     pub(crate) fn eq(&self, file: &FileItem) -> bool {
         self._eq(file.size(), file.modified())
     }
+
+    pub(crate) fn should_update(&self, file: &FileItem, update: bool) -> bool {
+        if update {
+            self.size == 0 || !self.eq(file)
+        } else {
+            self.size == 0 && self.modified.eq_nearly(file.modified())
+        }
+    }
 }
 
 struct CacheState {

@@ -297,7 +297,12 @@ impl FileHasher {
                     return Ok(());
                 }
                 let hash = self.compute_hash(file)?;
-                if hash != cached.hash {
+                if hash == cached.hash {
+                    if cached.should_update(file, update) {
+                        cache.insert(path_in_cache, file, hash);
+                    }
+                    tx.send(CheckEvent::Progress(ProgressValue::with_size(file.size())))?;
+                } else {
                     if update {
                         cache.insert(path_in_cache, file, hash);
                     }
@@ -306,11 +311,6 @@ impl FileHasher {
                         CheckStatus::Modified,
                         ProgressValue::with_size(file.size()),
                     ))?;
-                } else {
-                    if update && !cached.eq(file) {
-                        cache.insert(path_in_cache, file, hash);
-                    }
-                    tx.send(CheckEvent::Progress(ProgressValue::with_size(file.size())))?;
                 }
             }
             None => {
