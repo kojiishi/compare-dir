@@ -1,9 +1,10 @@
-use crate::{FileHasher, FileItem};
+use crate::{FileHasher, FileItem, SystemTimeExt};
 use indicatif::FormattedDuration;
 use std::cmp::Ordering;
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 /// How a file is classified during comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +151,18 @@ impl FileComparisonResult {
         Ok(())
     }
 
+    pub(crate) fn update_moodified(&mut self, t1: SystemTime, t2: SystemTime) {
+        self.modified_time_comparison = Some(if t1.eq_nearly(t2) {
+            Ordering::Equal
+        } else {
+            t1.cmp(&t2)
+        })
+    }
+
+    pub(crate) fn update_size(&mut self, s1: u64, s2: u64) {
+        self.size_comparison = Some(s1.cmp(&s2));
+    }
+
     /// True if the two files are identical; i.e., modified times and sizes are
     /// the same. Contents are the same too, or content comparison was skipped.
     pub fn is_identical(&self) -> bool {
@@ -157,6 +170,13 @@ impl FileComparisonResult {
             && self.modified_time_comparison == Some(Ordering::Equal)
             && self.size_comparison == Some(Ordering::Equal)
             && self.is_content_same != Some(false)
+    }
+
+    pub(crate) fn is_identical_content(&self) -> Option<bool> {
+        match self.size_comparison {
+            None | Some(Ordering::Equal) => self.is_content_same,
+            _ => Some(false),
+        }
     }
 
     pub fn to_symbol_string(&self) -> String {

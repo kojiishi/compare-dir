@@ -1,6 +1,6 @@
 use crate::{
-    ColumnFormatter, DirectoryComparer, FileComparer, FileHashCache, FileItem, FileIterator,
-    OutputFormat, Progress, ProgressBuilder, ProgressValue,
+    Classification, ColumnFormatter, DirectoryComparer, FileComparer, FileComparisonResult,
+    FileHashCache, FileItem, FileIterator, OutputFormat, Progress, ProgressBuilder, ProgressValue,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{self, AtomicUsize},
         mpsc,
     },
     time,
@@ -29,17 +29,11 @@ enum DupEvent {
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum CheckStatus {
-    New,
-    Modified,
-}
-
 #[derive(Debug)]
 enum CheckEvent {
     StartChecking,
     Total(ProgressValue),
-    Result(FileItem, CheckStatus, ProgressValue),
+    Result(FileComparisonResult, ProgressValue),
     Progress(ProgressValue),
     Error(FileItem),
 }
@@ -116,8 +110,8 @@ impl FileHasher {
         log::info!(
             "Hash stats for {:?}: {} computed, {} looked up",
             self.dirs,
-            self.num_hashed.load(Ordering::Relaxed),
-            self.num_hash_looked_up.load(Ordering::Relaxed)
+            self.num_hashed.load(atomic::Ordering::Relaxed),
+            self.num_hash_looked_up.load(atomic::Ordering::Relaxed)
         );
         if let Some(cache) = &self.cache {
             cache.save()?;
@@ -171,23 +165,30 @@ impl FileHasher {
                         progress.set_length(value);
                         progress.set_message("");
                     }
-                    CheckEvent::Result(file, status, value) => {
-                        let symbol = match status {
-                            CheckStatus::New => {
-                                num_new += 1;
-                                '+'
-                            }
-                            CheckStatus::Modified => {
-                                num_modified += 1;
-                                '!'
-                            }
-                        };
+                    CheckEvent::Result(result, value) => {
                         progress.inc(value);
-                        progress.suspend_for(stdout(), || {
-                            let base_dir = &self.dirs[0];
-                            let rel_path = file.relative_path(base_dir);
-                            println!("{} {}", symbol, rel_path.display());
-                        });
+                        match self.output_format {
+                            OutputFormat::Symbol => progress.suspend_for(stdout(), || {
+                                println!(
+                                    "{} {}",
+                                    result.to_symbol_string(),
+                                    result.relative_path.display()
+                                );
+                            }),
+                            OutputFormat::Default => progress.suspend_for(stdout(), || {
+                                println!(
+                                    "{}: {}",
+                                    result.relative_path.display(),
+                                    result.to_string("cached", "current")
+                                );
+                            }),
+                            _ => unreachable!(),
+                        }
+                        if result.classification == Classification::OnlyInDir2 {
+                            num_new += 1;
+                        } else if result.is_identical_content() == Some(false) {
+                            num_modified += 1;
+                        }
                     }
                     CheckEvent::Progress(value) => {
                         progress.inc(value);
@@ -213,7 +214,10 @@ impl FileHasher {
     ) -> io::Result<()> {
         let summary = [
             ("Elapsed:", 0),
-            ("Hash computed:", self.num_hashed.load(Ordering::Relaxed)),
+            (
+                "Hash computed:",
+                self.num_hashed.load(atomic::Ordering::Relaxed),
+            ),
             ("New files:", num_new),
             ("Modified files:", num_modified),
             ("Errors:", num_error),
@@ -288,15 +292,21 @@ impl FileHasher {
         let path_in_cache = file.relative_path(cache.base_dir());
         match cache.get_entry(path_in_cache) {
             Some(cached) => {
+                let mut result =
+                    FileComparisonResult::new(file.path().into(), Classification::InBoth);
+                result.update_moodified(cached.modified, file.modified());
+                if cached.size != 0 {
+                    result.update_size(cached.size, file.size());
+                }
                 if !update && cached.size != 0 && file.size() != cached.size {
                     tx.send(CheckEvent::Result(
-                        file.clone(),
-                        CheckStatus::Modified,
+                        result,
                         ProgressValue::with_skip(file.size()),
                     ))?;
                     return Ok(());
                 }
                 let hash = self.compute_hash(file)?;
+                result.is_content_same = Some(hash == cached.hash);
                 if hash == cached.hash {
                     if cached.should_update(file, update) {
                         cache.insert(path_in_cache, file, hash);
@@ -307,8 +317,7 @@ impl FileHasher {
                         cache.insert(path_in_cache, file, hash);
                     }
                     tx.send(CheckEvent::Result(
-                        file.clone(),
-                        CheckStatus::Modified,
+                        result,
                         ProgressValue::with_size(file.size()),
                     ))?;
                 }
@@ -319,8 +328,7 @@ impl FileHasher {
                     cache.insert(path_in_cache, file, hash);
                 }
                 tx.send(CheckEvent::Result(
-                    file.clone(),
-                    CheckStatus::New,
+                    FileComparisonResult::new(file.path().into(), Classification::OnlyInDir2),
                     ProgressValue::with_size(file.size()),
                 ))?;
             }
@@ -356,7 +364,7 @@ impl FileHasher {
         total_wasted_space: u64,
     ) -> io::Result<()> {
         let elapsed = FormattedDuration(start_time.elapsed()).to_string();
-        let num_hashed = self.num_hashed.load(Ordering::Relaxed).to_string();
+        let num_hashed = self.num_hashed.load(atomic::Ordering::Relaxed).to_string();
         let total_wasted_space = crate::human_readable_size(total_wasted_space);
         let summary = [
             ("Elapsed:", elapsed),
@@ -537,7 +545,8 @@ impl FileHasher {
     ) -> io::Result<(Option<blake3::Hash>, &'a Path)> {
         let relative = file.relative_path(cache.base_dir());
         if let Some(hash) = cache.get(relative, file) {
-            self.num_hash_looked_up.fetch_add(1, Ordering::Relaxed);
+            self.num_hash_looked_up
+                .fetch_add(1, atomic::Ordering::Relaxed);
             return Ok((Some(hash), relative));
         }
         Ok((None, relative))
@@ -570,7 +579,7 @@ impl FileHasher {
             }
         }
         progress.finish();
-        self.num_hashed.fetch_add(1, Ordering::Relaxed);
+        self.num_hashed.fetch_add(1, atomic::Ordering::Relaxed);
         let hash = hasher.finalize();
         log::debug!(
             "Computed hash in {}: '{}'",
@@ -661,6 +670,7 @@ impl DuplicatedFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cmp::Ordering;
 
     fn default_exclude() -> globset::GlobSet {
         let mut builder = globset::GlobSetBuilder::new();
@@ -690,8 +700,8 @@ mod tests {
         hasher.buffer_size = 8192;
         let duplicates = hasher.find_duplicates()?;
 
-        assert_eq!(hasher.num_hashed.load(Ordering::Relaxed), 2);
-        assert_eq!(hasher.num_hash_looked_up.load(Ordering::Relaxed), 0);
+        assert_eq!(hasher.num_hashed.load(atomic::Ordering::Relaxed), 2);
+        assert_eq!(hasher.num_hash_looked_up.load(atomic::Ordering::Relaxed), 0);
 
         assert_eq!(duplicates.len(), 1);
         let group = &duplicates[0];
@@ -727,8 +737,11 @@ mod tests {
         let duplicates_aa = hasher_aa.find_duplicates()?;
         assert_eq!(duplicates_aa.len(), 1);
         assert!(cache_aa_path.exists());
-        assert_eq!(hasher_aa.num_hashed.load(Ordering::Relaxed), 2);
-        assert_eq!(hasher_aa.num_hash_looked_up.load(Ordering::Relaxed), 0);
+        assert_eq!(hasher_aa.num_hashed.load(atomic::Ordering::Relaxed), 2);
+        assert_eq!(
+            hasher_aa.num_hash_looked_up.load(atomic::Ordering::Relaxed),
+            0
+        );
 
         // Create empty cache file in a to force it to be the cache base
         let root_a = dir_path.join("a");
@@ -739,8 +752,11 @@ mod tests {
         let hasher_a = FileHasher::new(&[&root_a])?;
         let duplicates_a = hasher_a.find_duplicates()?;
         assert_eq!(duplicates_a.len(), 1);
-        assert_eq!(hasher_a.num_hashed.load(Ordering::Relaxed), 0);
-        assert_eq!(hasher_a.num_hash_looked_up.load(Ordering::Relaxed), 2);
+        assert_eq!(hasher_a.num_hashed.load(atomic::Ordering::Relaxed), 0);
+        assert_eq!(
+            hasher_a.num_hash_looked_up.load(atomic::Ordering::Relaxed),
+            2
+        );
 
         // The merged child cache should be removed.
         assert!(cache_a_path.exists());
@@ -787,7 +803,7 @@ mod tests {
     struct CheckCollector {
         start_seen: bool,
         total_files: Option<u64>,
-        results: Vec<(PathBuf, CheckStatus)>,
+        results: Vec<FileComparisonResult>,
         file_done_count: u64,
         num_error: usize,
     }
@@ -804,9 +820,13 @@ mod tests {
                 match event {
                     CheckEvent::StartChecking => self.start_seen = true,
                     CheckEvent::Total(total) => self.total_files = Some(total.num_files),
-                    CheckEvent::Result(file, status, _size) => {
-                        let stripped = file.path().strip_prefix(base_dir).unwrap().to_path_buf();
-                        self.results.push((stripped, status));
+                    CheckEvent::Result(mut result, _size) => {
+                        result.relative_path = result
+                            .relative_path
+                            .strip_prefix(base_dir)
+                            .unwrap()
+                            .to_path_buf();
+                        self.results.push(result);
                     }
                     CheckEvent::Progress(progress_val) => {
                         self.file_done_count += progress_val.num_files;
@@ -840,10 +860,12 @@ mod tests {
         assert_eq!(collector.num_error, 0);
 
         let mut results = collector.results;
-        results.sort_by(|a, b| a.0.cmp(&b.0));
+        results.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0], (PathBuf::from("file1.txt"), CheckStatus::New));
-        assert_eq!(results[1], (PathBuf::from("file2.txt"), CheckStatus::New));
+        assert_eq!(results[0].relative_path, Path::new("file1.txt"));
+        assert_eq!(results[0].classification, Classification::OnlyInDir2);
+        assert_eq!(results[1].relative_path, Path::new("file2.txt"));
+        assert_eq!(results[1].classification, Classification::OnlyInDir2);
 
         assert!(!dir.path().join(FileHashCache::FILE_NAME).exists());
         Ok(())
@@ -892,10 +914,10 @@ mod tests {
         let collector = CheckCollector::collect(rx, &dir_path);
         assert_eq!(collector.results.len(), 1);
         let results = collector.results;
-        assert_eq!(
-            results[0],
-            (PathBuf::from("file1.txt"), CheckStatus::Modified)
-        );
+        assert_eq!(results[0].relative_path, Path::new("file1.txt"));
+        assert_eq!(results[0].modified_time_comparison, Some(Ordering::Less));
+        assert_eq!(results[0].size_comparison, Some(Ordering::Less));
+        assert_eq!(results[0].is_content_same, None);
         assert_eq!(collector.file_done_count, 1);
         Ok(())
     }

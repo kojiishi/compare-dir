@@ -81,6 +81,7 @@ how files are compared.
 | full | Compare file contents byte-by-byte. |
 
 #### Output Formats
+[output format]: #output-formats
 
 When comparing two directories,
 the output is human-readable by default.
@@ -157,12 +158,19 @@ Then the `-c check` option can find changed files.
 ```shell-session
 compare-dir -c check <dir>
 ```
-
-It prints a symbol, followed by the path.
-| Symbol | Meaning |
-| --- | --- |
-| `+` | The file isn't in the [hash cache]. |
-| `!` | The file is changed. |
+This prints the same output as [compare directories],
+as if it compares the current files
+against the files when the [hash cache] was created.
+For example, with the `-s` option (the [output format] is [symbols]):
+```
+<   file1
+=<< file2
+=<! file3
+```
+This means that:
+* `file1` was added.
+* `file2` became newer and larger.
+* `file3` became newer and different content, but the size didn't change.
 
 The `-c check` option doesn't update the [hash cache],
 so that you can run it multiple times.
