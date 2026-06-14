@@ -1,4 +1,4 @@
-use crate::{FileHasher, FileItem, SystemTimeExt};
+use crate::{FileHasher, FileItem, OutputFormat, SystemTimeExt};
 use indicatif::FormattedDuration;
 use std::cmp::Ordering;
 use std::fs;
@@ -176,6 +176,26 @@ impl FileComparisonResult {
         match self.size_comparison {
             None | Some(Ordering::Equal) => self.is_content_same,
             _ => Some(false),
+        }
+    }
+
+    pub(crate) fn print(&self, output_format: OutputFormat, dir1_name: &str, dir2_name: &str) {
+        match output_format {
+            OutputFormat::Default => {
+                if !self.is_identical() {
+                    println!(
+                        "{}: {}",
+                        self.relative_path.display(),
+                        self.to_string(dir1_name, dir2_name)
+                    )
+                }
+            }
+            OutputFormat::Symbol => println!(
+                "{} {}",
+                self.to_symbol_string(),
+                self.relative_path.display()
+            ),
+            _ => unreachable!(),
         }
     }
 
