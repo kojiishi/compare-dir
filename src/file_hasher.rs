@@ -167,23 +167,9 @@ impl FileHasher {
                     }
                     CheckEvent::Result(result, value) => {
                         progress.inc(value);
-                        match self.output_format {
-                            OutputFormat::Symbol => progress.suspend_for(stdout(), || {
-                                println!(
-                                    "{} {}",
-                                    result.to_symbol_string(),
-                                    result.relative_path.display()
-                                );
-                            }),
-                            OutputFormat::Default => progress.suspend_for(stdout(), || {
-                                println!(
-                                    "{}: {}",
-                                    result.relative_path.display(),
-                                    result.to_string("cached", "current")
-                                );
-                            }),
-                            _ => unreachable!(),
-                        }
+                        progress.suspend_for(stdout(), || {
+                            result.print(self.output_format, "cached", "current")
+                        });
                         if result.classification == Classification::OnlyInDir2 {
                             num_new += 1;
                         } else if result.is_identical_content() == Some(false) {

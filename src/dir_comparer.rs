@@ -104,27 +104,9 @@ impl DirectoryComparer {
                     }
                     CompareProgress::Result(_, result) => {
                         summary.update(&result);
-                        match self.output_format {
-                            OutputFormat::Symbol => progress.suspend_for(stdout(), || {
-                                println!(
-                                    "{} {}",
-                                    result.to_symbol_string(),
-                                    result.relative_path.display()
-                                );
-                            }),
-                            OutputFormat::Default => {
-                                if !result.is_identical() {
-                                    progress.suspend_for(stdout(), || {
-                                        println!(
-                                            "{}: {}",
-                                            result.relative_path.display(),
-                                            result.to_string(dir1_str, dir2_str)
-                                        );
-                                    });
-                                }
-                            }
-                            _ => unreachable!(),
-                        }
+                        progress.suspend_for(stdout(), || {
+                            result.print(self.output_format, dir1_str, dir2_str)
+                        });
                     }
                     CompareProgress::Progress(value) => progress.inc(value),
                     CompareProgress::Error => summary.num_errors += 1,
