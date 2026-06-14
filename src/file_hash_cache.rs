@@ -10,10 +10,10 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug)]
-struct CacheEntry {
-    hash: Hash,
-    size: u64,
-    modified: SystemTime,
+pub(crate) struct CacheEntry {
+    pub(crate) hash: Hash,
+    pub(crate) size: u64,
+    pub(crate) modified: SystemTime,
     is_remove_if_no_access: bool,
 }
 
@@ -34,6 +34,14 @@ impl CacheEntry {
             modified: file.modified(),
             is_remove_if_no_access: false,
         }
+    }
+
+    fn _eq(&self, size: u64, modified: SystemTime) -> bool {
+        (self.size == 0 || self.size == size) && self.modified.eq_nearly(modified)
+    }
+
+    pub(crate) fn eq(&self, file: &FileItem) -> bool {
+        self._eq(file.size(), file.modified())
     }
 }
 
@@ -166,12 +174,12 @@ impl FileHashCache {
     }
 
     /// Retrieves an entry's hash from the cache, ignoring the modified time.
-    pub fn get_by_path(&self, path: &Path) -> Option<Hash> {
+    pub(crate) fn get_entry(&self, path: &Path) -> Option<CacheEntry> {
         assert!(path.is_relative());
         let mut state = self.state.lock().unwrap();
         if let Some(entry) = state.entries.get_mut(path) {
             entry.is_remove_if_no_access = false;
-            return Some(entry.hash);
+            return Some(entry.clone());
         }
         None
     }
@@ -185,8 +193,7 @@ impl FileHashCache {
         assert!(path.is_relative());
         let mut state = self.state.lock().unwrap();
         if let Some(entry) = state.entries.get_mut(path)
-            && (entry.size == 0 || entry.size == size)
-            && entry.modified.eq_nearly(modified)
+            && entry._eq(size, modified)
         {
             entry.is_remove_if_no_access = false;
             return Some(entry.hash);
