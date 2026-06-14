@@ -39,7 +39,7 @@ enum CheckStatus {
 enum CheckEvent {
     StartChecking,
     Total(ProgressValue),
-    Result(PathBuf, CheckStatus, ProgressValue),
+    Result(FileItem, CheckStatus, ProgressValue),
     Progress(ProgressValue),
     Error(FileItem),
 }
@@ -171,7 +171,7 @@ impl FileHasher {
                         progress.set_length(value);
                         progress.set_message("");
                     }
-                    CheckEvent::Result(path, status, value) => {
+                    CheckEvent::Result(file, status, value) => {
                         let symbol = match status {
                             CheckStatus::New => {
                                 num_new += 1;
@@ -184,7 +184,9 @@ impl FileHasher {
                         };
                         progress.inc(value);
                         progress.suspend_for(stdout(), || {
-                            println!("{} {}", symbol, path.display());
+                            let base_dir = &self.dirs[0];
+                            let rel_path = file.relative_path(base_dir);
+                            println!("{} {}", symbol, rel_path.display());
                         });
                     }
                     CheckEvent::Progress(value) => {
@@ -287,10 +289,8 @@ impl FileHasher {
         match cache.get_entry(path_in_cache) {
             Some(cached) => {
                 if !update && cached.size != 0 && file.size() != cached.size {
-                    let base_dir = &self.dirs[0];
-                    let rel_path = file.relative_path(base_dir);
                     tx.send(CheckEvent::Result(
-                        rel_path.into(),
+                        file.clone(),
                         CheckStatus::Modified,
                         ProgressValue::with_skip(file.size()),
                     ))?;
@@ -301,10 +301,8 @@ impl FileHasher {
                     if update {
                         cache.insert(path_in_cache, file, hash);
                     }
-                    let base_dir = &self.dirs[0];
-                    let rel_path = file.relative_path(base_dir);
                     tx.send(CheckEvent::Result(
-                        rel_path.into(),
+                        file.clone(),
                         CheckStatus::Modified,
                         ProgressValue::with_size(file.size()),
                     ))?;
@@ -320,10 +318,8 @@ impl FileHasher {
                     let hash = self.compute_hash(file)?;
                     cache.insert(path_in_cache, file, hash);
                 }
-                let base_dir = &self.dirs[0];
-                let rel_path = file.relative_path(base_dir);
                 tx.send(CheckEvent::Result(
-                    rel_path.into(),
+                    file.clone(),
                     CheckStatus::New,
                     ProgressValue::with_size(file.size()),
                 ))?;
@@ -810,7 +806,9 @@ mod tests {
             match event {
                 CheckEvent::StartChecking => start_seen = true,
                 CheckEvent::Total(total) => total_files = Some(total.num_files),
-                CheckEvent::Result(path, status, _size) => results.push((path, status)),
+                CheckEvent::Result(file, status, _size) => {
+                    results.push((file.into_path_buf(), status))
+                }
                 CheckEvent::Progress(progress_val) => file_done_count += progress_val.num_files,
                 CheckEvent::Error(_) => num_error += 1,
             }
@@ -820,6 +818,9 @@ mod tests {
         assert_eq!(file_done_count, 0);
         assert_eq!(num_error, 0);
 
+        for result in &mut results {
+            result.0 = result.0.strip_prefix(&dir_path).unwrap().into();
+        }
         results.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(results.len(), 2);
         assert_eq!(results[0], (PathBuf::from("file1.txt"), CheckStatus::New));
@@ -881,12 +882,17 @@ mod tests {
         let mut file_done_count = 0;
         while let Ok(event) = rx.recv() {
             match event {
-                CheckEvent::Result(path, status, _size) => results.push((path, status)),
+                CheckEvent::Result(file, status, _size) => {
+                    results.push((file.into_path_buf(), status))
+                }
                 CheckEvent::Progress(progress_val) => file_done_count += progress_val.num_files,
                 _ => {}
             }
         }
         assert_eq!(results.len(), 1);
+        for result in &mut results {
+            result.0 = result.0.strip_prefix(&dir_path).unwrap().into();
+        }
         assert_eq!(
             results[0],
             (PathBuf::from("file1.txt"), CheckStatus::Modified)
