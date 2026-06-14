@@ -1,3 +1,4 @@
+use crate::{FileComparer, FileItem, SystemTimeExt};
 use blake3::Hash;
 use indicatif::FormattedDuration;
 use simple_path::SimplePath;
@@ -8,21 +9,29 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::FileComparer;
-use crate::SystemTimeExt;
-
-#[derive(Debug, Clone)]
-pub struct CacheEntry {
-    pub hash: Hash,
-    pub modified: SystemTime,
-    pub is_remove_if_no_access: bool,
+#[derive(Clone, Debug)]
+struct CacheEntry {
+    hash: Hash,
+    size: u64,
+    modified: SystemTime,
+    is_remove_if_no_access: bool,
 }
 
 impl CacheEntry {
-    pub fn new(hash: Hash, modified: SystemTime) -> Self {
+    fn new(hash: Hash, size: u64, modified: SystemTime) -> Self {
         Self {
             hash,
+            size,
             modified,
+            is_remove_if_no_access: false,
+        }
+    }
+
+    fn with_file_item(hash: Hash, file: &FileItem) -> Self {
+        Self {
+            hash,
+            size: file.size(),
+            modified: file.modified(),
             is_remove_if_no_access: false,
         }
     }
@@ -168,10 +177,15 @@ impl FileHashCache {
     }
 
     /// Retrieves an entry's hash from the cache if the modified time matches.
-    pub fn get(&self, path: &Path, modified: SystemTime) -> Option<Hash> {
+    pub fn get(&self, path: &Path, file: &FileItem) -> Option<Hash> {
+        self._get(path, file.size(), file.modified())
+    }
+
+    fn _get(&self, path: &Path, size: u64, modified: SystemTime) -> Option<Hash> {
         assert!(path.is_relative());
         let mut state = self.state.lock().unwrap();
         if let Some(entry) = state.entries.get_mut(path)
+            && (entry.size == 0 || entry.size == size)
             && entry.modified.eq_nearly(modified)
         {
             entry.is_remove_if_no_access = false;
@@ -181,12 +195,14 @@ impl FileHashCache {
     }
 
     /// Inserts a hash into the cache for a given path and modified time.
-    pub fn insert(&self, path: &Path, modified: SystemTime, hash: Hash) {
+    pub fn insert(&self, path: &Path, file: &FileItem, hash: Hash) {
+        self.insert_entry(path, CacheEntry::with_file_item(hash, file));
+    }
+
+    fn insert_entry(&self, path: &Path, entry: CacheEntry) {
         assert!(path.is_relative());
         let mut state = self.state.lock().unwrap();
-        state
-            .entries
-            .insert(path.to_path_buf(), CacheEntry::new(hash, modified));
+        state.entries.insert(path.to_path_buf(), entry);
         state.is_dirty = true;
     }
 
@@ -247,6 +263,7 @@ impl FileHashCache {
         let mut file = File::create(&temp_path)?;
         {
             let mut writer = std::io::BufWriter::with_capacity(Self::BUFFER_SIZE, &mut file);
+            writeln!(writer, "hash_cache: 1")?;
             for (rel_path, entry) in state.entries.iter() {
                 Self::write_cache_entry(&mut writer, rel_path, entry)?;
             }
@@ -292,8 +309,37 @@ impl FileHashCache {
         };
 
         let reader = BufReader::with_capacity(Self::BUFFER_SIZE, file);
-        for line in reader.lines().map_while(Result::ok) {
-            match Self::read_cache_entry(&line) {
+        let mut lines = reader.lines();
+        let mut version = 0;
+        match lines.next() {
+            Some(Ok(line)) => {
+                if let Some(ver_str) = line.strip_prefix("hash_cache: ")
+                    && let Ok(ver_value) = ver_str.parse::<u8>()
+                {
+                    version = ver_value;
+                } else {
+                    Self::load_cache_entries([line].into_iter(), 0, &mut entries);
+                }
+            }
+            _ => return entries,
+        }
+        Self::load_cache_entries(lines.map_while(Result::ok), version, &mut entries);
+        log::info!(
+            "Loaded {} hashes from '{}' in {}",
+            entries.len(),
+            path.display(),
+            FormattedDuration(start_time.elapsed())
+        );
+        entries
+    }
+
+    fn load_cache_entries(
+        lines: impl Iterator<Item = String>,
+        version: u8,
+        entries: &mut HashMap<PathBuf, CacheEntry>,
+    ) {
+        for line in lines {
+            match Self::read_cache_entry(&line, version) {
                 Ok((path, entry)) => {
                     entries.insert(path, entry);
                 }
@@ -302,13 +348,6 @@ impl FileHashCache {
                 }
             }
         }
-        log::info!(
-            "Loaded {} hashes from '{}' in {}",
-            entries.len(),
-            path.display(),
-            FormattedDuration(start_time.elapsed())
-        );
-        entries
     }
 
     fn write_cache_entry<W: std::io::Write>(
@@ -325,35 +364,44 @@ impl FileHashCache {
         let rel_path_str = rel_path_str.replace(std::path::MAIN_SEPARATOR, "/");
         writeln!(
             writer,
-            "{} {} {} {}",
+            "{} {} {} {} {}",
             entry.hash.to_hex(),
             duration.as_secs(),
             duration.subsec_nanos(),
+            entry.size,
             rel_path_str
         )
     }
 
-    fn read_cache_entry(line: &str) -> anyhow::Result<(PathBuf, CacheEntry)> {
-        let mut parts = line.splitn(4, ' ');
-        let hash_hex = parts
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Missing hash"))?;
-        let secs_str = parts
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Missing secs"))?;
-        let nanos_str = parts
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Missing nanos"))?;
-        let rel_path = parts
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Missing path"))?;
+    fn read_cache_entry(line: &str, version: u8) -> anyhow::Result<(PathBuf, CacheEntry)> {
+        let num_fields = match version {
+            0 => 4,
+            1 => 5,
+            _ => anyhow::bail!("Can't parse version {version}"),
+        };
+        let fields: Vec<&str> = line.splitn(num_fields, ' ').collect();
+        if fields.len() != num_fields {
+            anyhow::bail!("Missing fields, only {num_fields}");
+        }
+        let hash_hex = fields[0];
+        let secs_str = fields[1];
+        let nanos_str = fields[2];
+        let (size_str, rel_path) = match version {
+            0 => ("0", fields[3]),
+            1 => (fields[3], fields[4]),
+            _ => unreachable!(),
+        };
         #[cfg(windows)]
         let rel_path = rel_path.replace('/', std::path::MAIN_SEPARATOR_STR);
         let hash = Hash::from_hex(hash_hex)?;
         let secs = secs_str.parse::<u64>()?;
         let nanos = nanos_str.parse::<u32>()?;
+        let size = size_str.parse::<u64>()?;
         let modified = UNIX_EPOCH + Duration::new(secs, nanos);
-        Ok((PathBuf::from(rel_path), CacheEntry::new(hash, modified)))
+        Ok((
+            PathBuf::from(rel_path),
+            CacheEntry::new(hash, size, modified),
+        ))
     }
 }
 
@@ -371,13 +419,17 @@ impl CacheState {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::{
         fs,
         ops::{Add, Sub},
     };
-
-    use super::*;
     use tempfile::tempdir;
+
+    const TEST_HASH_HEX: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+    const ALT_HASH_HEX: &str = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100";
+    const CONFLICT_HASH_HEX: &str =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     #[test]
     fn file_hash_cache() -> anyhow::Result<()> {
@@ -385,19 +437,20 @@ mod tests {
         let cache = FileHashCache::new(dir.path());
 
         let path = PathBuf::from("test.txt");
-        let modified = SystemTime::now();
-        let hash =
-            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
+        let file_path = dir.path().join(&path);
+        fs::write(&file_path, "hello")?;
+        let file = FileItem::try_from(file_path.as_path())?;
+        let hash = Hash::from_hex(TEST_HASH_HEX)?;
 
-        cache.insert(&path, modified, hash);
-        assert!(cache.get(&path, modified).is_some());
+        cache.insert(&path, &file, hash);
+        assert!(cache.get(&path, &file).is_some());
 
         cache.save()?;
 
         // Ensure file exists
         assert!(dir.path().join(FileHashCache::FILE_NAME).exists());
 
-        // Create new cache instance from same dir should load datac
+        // Create new cache instance from same dir should load data
         let dir_path = dir.path().to_path_buf();
 
         // Remove from global caches so find_or_new loads from disk
@@ -406,7 +459,7 @@ mod tests {
         let loaded_cache = FileHashCache::find_or_new(&dir_path);
         assert_eq!(loaded_cache.base_dir(), dir_path);
 
-        let retrieved_hash = loaded_cache.get(&path, modified);
+        let retrieved_hash = loaded_cache.get(&path, &file);
         assert_eq!(retrieved_hash, Some(hash));
 
         Ok(())
@@ -417,16 +470,17 @@ mod tests {
         let dir = tempdir()?;
         let cache = FileHashCache::new(dir.path());
 
-        let path = PathBuf::from("test.txt");
-        let modified = SystemTime::now();
-        let hash =
-            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
+        let rel_path = Path::new("test.txt");
+        let path = dir.path().join(rel_path);
+        fs::write(&path, "")?;
+        let file = FileItem::try_from(path.as_path())?;
+        let hash = Hash::from_hex(TEST_HASH_HEX)?;
 
-        cache.insert(&path, modified, hash);
-        assert!(cache.get(&path, modified).is_some());
+        cache.insert(rel_path, &file, hash);
+        assert!(cache.get(rel_path, &file).is_some());
 
         cache.clear(Path::new(""));
-        assert!(cache.get(&path, modified).is_none());
+        assert!(cache.get(rel_path, &file).is_none());
         assert!(cache.state.lock().unwrap().is_dirty);
 
         Ok(())
@@ -465,18 +519,17 @@ mod tests {
         let path1 = PathBuf::from("a/test1.txt");
         let path2 = PathBuf::from("b/test2.txt");
         let modified = SystemTime::now();
-        let hash =
-            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
+        let hash = Hash::from_hex(TEST_HASH_HEX)?;
 
-        cache.insert(&path1, modified, hash);
-        cache.insert(&path2, modified, hash);
+        cache.insert_entry(&path1, CacheEntry::new(hash, 0, modified));
+        cache.insert_entry(&path2, CacheEntry::new(hash, 0, modified));
 
-        assert!(cache.get(&path1, modified).is_some());
-        assert!(cache.get(&path2, modified).is_some());
+        assert!(cache._get(&path1, 0, modified).is_some());
+        assert!(cache._get(&path2, 0, modified).is_some());
 
         cache.clear(Path::new("a"));
-        assert!(cache.get(&path1, modified).is_none());
-        assert!(cache.get(&path2, modified).is_some());
+        assert!(cache._get(&path1, 0, modified).is_none());
+        assert!(cache._get(&path2, 0, modified).is_some());
 
         Ok(())
     }
@@ -537,67 +590,188 @@ mod tests {
 
     #[test]
     fn read_cache_entry_success() -> anyhow::Result<()> {
-        let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
-        let line = format!("{} 12345 67890 test.txt", hash_hex);
-        let (path, entry) = FileHashCache::read_cache_entry(&line)?;
+        let hash_hex = TEST_HASH_HEX;
 
-        assert_eq!(path, PathBuf::from("test.txt"));
-        assert_eq!(entry.hash, Hash::from_hex(hash_hex)?);
+        // Version 0
+        let line_v0 = format!("{hash_hex} 12345 67890 test.txt");
+        let (path_v0, entry_v0) = FileHashCache::read_cache_entry(&line_v0, 0)?;
+        assert_eq!(path_v0, PathBuf::from("test.txt"));
+        assert_eq!(entry_v0.hash, Hash::from_hex(hash_hex)?);
         let expected_modified = UNIX_EPOCH + Duration::new(12345, 67890);
-        assert_eq!(entry.modified, expected_modified);
+        assert_eq!(entry_v0.modified, expected_modified);
+        assert_eq!(entry_v0.size, 0);
+
+        // Version 1
+        let line_v1 = format!("{hash_hex} 12345 67890 999 test.txt");
+        let (path_v1, entry_v1) = FileHashCache::read_cache_entry(&line_v1, 1)?;
+        assert_eq!(path_v1, PathBuf::from("test.txt"));
+        assert_eq!(entry_v1.hash, Hash::from_hex(hash_hex)?);
+        assert_eq!(entry_v1.modified, expected_modified);
+        assert_eq!(entry_v1.size, 999);
+
         Ok(())
     }
 
     #[test]
     fn read_cache_entry_spaces_in_path() -> anyhow::Result<()> {
-        let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
-        let line = format!("{} 12345 67890 path with spaces.txt", hash_hex);
-        let (path, entry) = FileHashCache::read_cache_entry(&line)?;
+        let hash_hex = TEST_HASH_HEX;
 
-        assert_eq!(path, PathBuf::from("path with spaces.txt"));
-        assert_eq!(entry.hash, Hash::from_hex(hash_hex)?);
+        // Version 0
+        let line_v0 = format!("{hash_hex} 12345 67890 path with spaces.txt");
+        let (path_v0, entry_v0) = FileHashCache::read_cache_entry(&line_v0, 0)?;
+        assert_eq!(path_v0, PathBuf::from("path with spaces.txt"));
+        assert_eq!(entry_v0.hash, Hash::from_hex(hash_hex)?);
+        assert_eq!(entry_v0.size, 0);
+
+        // Version 1
+        let line_v1 = format!("{hash_hex} 12345 67890 999 path with spaces.txt");
+        let (path_v1, entry_v1) = FileHashCache::read_cache_entry(&line_v1, 1)?;
+        assert_eq!(path_v1, PathBuf::from("path with spaces.txt"));
+        assert_eq!(entry_v1.hash, Hash::from_hex(hash_hex)?);
+        assert_eq!(entry_v1.size, 999);
+
         Ok(())
     }
 
     #[test]
     fn read_cache_entry_failures() {
+        let hash_hex = TEST_HASH_HEX;
+
+        // Version 0
         // Missing fields
-        assert!(FileHashCache::read_cache_entry("").is_err());
-        assert!(FileHashCache::read_cache_entry("hash").is_err());
-        assert!(FileHashCache::read_cache_entry("hash 123").is_err());
-        assert!(FileHashCache::read_cache_entry("hash 123 456").is_err());
+        assert!(FileHashCache::read_cache_entry("", 0).is_err());
+        assert!(FileHashCache::read_cache_entry("hash", 0).is_err());
+        assert!(FileHashCache::read_cache_entry("hash 123", 0).is_err());
+        assert!(FileHashCache::read_cache_entry("hash 123 456", 0).is_err());
 
         // Invalid hash
-        assert!(FileHashCache::read_cache_entry("invalid_hex 123 456 path.txt").is_err());
+        assert!(FileHashCache::read_cache_entry("invalid_hex 123 456 path.txt", 0).is_err());
 
         // Invalid numbers
-        let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
         assert!(
-            FileHashCache::read_cache_entry(&format!("{} abc 456 path.txt", hash_hex)).is_err()
+            FileHashCache::read_cache_entry(&format!("{hash_hex} abc 456 path.txt"), 0).is_err()
         );
         assert!(
-            FileHashCache::read_cache_entry(&format!("{} 123 def path.txt", hash_hex)).is_err()
+            FileHashCache::read_cache_entry(&format!("{hash_hex} 123 def path.txt"), 0).is_err()
         );
+
+        // Version 1
+        // Missing fields
+        assert!(FileHashCache::read_cache_entry("", 1).is_err());
+        assert!(FileHashCache::read_cache_entry("hash", 1).is_err());
+        assert!(FileHashCache::read_cache_entry("hash 123", 1).is_err());
+        assert!(FileHashCache::read_cache_entry("hash 123 456", 1).is_err());
+        assert!(FileHashCache::read_cache_entry("hash 123 456 999", 1).is_err());
+
+        // Invalid hash
+        assert!(FileHashCache::read_cache_entry("invalid_hex 123 456 999 path.txt", 1).is_err());
+
+        // Invalid numbers
+        assert!(
+            FileHashCache::read_cache_entry(&format!("{hash_hex} abc 456 999 path.txt"), 1)
+                .is_err()
+        );
+        assert!(
+            FileHashCache::read_cache_entry(&format!("{hash_hex} 123 def 999 path.txt"), 1)
+                .is_err()
+        );
+        assert!(
+            FileHashCache::read_cache_entry(&format!("{hash_hex} 123 456 ghi path.txt"), 1)
+                .is_err()
+        );
+
+        // Invalid version
+        assert!(
+            FileHashCache::read_cache_entry(&format!("{hash_hex} 123 456 999 path.txt"), 2)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn load_cache() -> anyhow::Result<()> {
+        let hash_hex = TEST_HASH_HEX;
+        let alt_hash_hex = ALT_HASH_HEX;
+
+        // 1. Non-existent directory
+        let temp = tempdir()?;
+        let non_existent = temp.path().join("non_existent");
+        let entries = FileHashCache::load_cache(&non_existent);
+        assert!(entries.is_empty());
+
+        // 2. Empty file
+        let cache_file = temp.path().join(FileHashCache::FILE_NAME);
+        fs::write(&cache_file, "")?;
+        let entries = FileHashCache::load_cache(temp.path());
+        assert!(entries.is_empty());
+
+        // 3. Version 0 file (no version header)
+        fs::write(
+            &cache_file,
+            format!("{hash_hex} 12345 67890 test1.txt\n{alt_hash_hex} 23456 78901 test2.txt\n"),
+        )?;
+        let entries = FileHashCache::load_cache(temp.path());
+        assert_eq!(entries.len(), 2);
+        let entry1 = entries.get(Path::new("test1.txt")).unwrap();
+        assert_eq!(entry1.hash, Hash::from_hex(hash_hex)?);
+        assert_eq!(entry1.modified, UNIX_EPOCH + Duration::new(12345, 67890));
+        assert_eq!(entry1.size, 0);
+        let entry2 = entries.get(Path::new("test2.txt")).unwrap();
+        assert_eq!(entry2.hash, Hash::from_hex(alt_hash_hex)?);
+        assert_eq!(entry2.modified, UNIX_EPOCH + Duration::new(23456, 78901));
+        assert_eq!(entry2.size, 0);
+
+        // 4. Version 1 file (with version header)
+        fs::write(
+            &cache_file,
+            format!(
+                "hash_cache: 1\n{hash_hex} 12345 67890 500 test1.txt\n{alt_hash_hex} 23456 78901 600 test2.txt\n"
+            ),
+        )?;
+        let entries = FileHashCache::load_cache(temp.path());
+        assert_eq!(entries.len(), 2);
+        let entry1 = entries.get(Path::new("test1.txt")).unwrap();
+        assert_eq!(entry1.hash, Hash::from_hex(hash_hex)?);
+        assert_eq!(entry1.modified, UNIX_EPOCH + Duration::new(12345, 67890));
+        assert_eq!(entry1.size, 500);
+        let entry2 = entries.get(Path::new("test2.txt")).unwrap();
+        assert_eq!(entry2.hash, Hash::from_hex(alt_hash_hex)?);
+        assert_eq!(entry2.modified, UNIX_EPOCH + Duration::new(23456, 78901));
+        assert_eq!(entry2.size, 600);
+
+        // 5. Mixed valid and invalid lines
+        fs::write(
+            &cache_file,
+            format!(
+                "hash_cache: 1\n\
+                 {hash_hex} 12345 67890 500 test1.txt\n\
+                 invalid_line_here\n\
+                 {alt_hash_hex} 23456 78901 600 test2.txt\n"
+            ),
+        )?;
+        let entries = FileHashCache::load_cache(temp.path());
+        assert_eq!(entries.len(), 2);
+        assert!(entries.contains_key(Path::new("test1.txt")));
+        assert!(entries.contains_key(Path::new("test2.txt")));
+        Ok(())
     }
 
     #[test]
     fn write_cache_entry() -> anyhow::Result<()> {
         let mut buf = Vec::new();
         let path = Path::new("test.txt");
-        let hash_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        let hash_hex = TEST_HASH_HEX;
         let hash = Hash::from_hex(hash_hex)?;
         // While Linux supports 1-nanosecond resolution, Windows `FILETIME` is
         // 100-nanosecond intervals.
         let modified = UNIX_EPOCH + Duration::new(12345, 67800);
-        let entry = CacheEntry::new(hash, modified);
-
+        let entry = CacheEntry::new(hash, 0, modified);
         FileHashCache::write_cache_entry(&mut buf, path, &entry)?;
-
         let output = String::from_utf8(buf)?;
-        let expected = format!("{} 12345 67800 test.txt\n", hash_hex);
+        let expected = format!("{hash_hex} 12345 67800 0 test.txt\n");
         assert_eq!(output, expected);
         Ok(())
     }
+
     #[test]
     fn merge() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
@@ -610,21 +784,19 @@ mod tests {
         let path1 = PathBuf::from("file1.txt");
         let path2 = PathBuf::from("file2.txt");
         let modified = SystemTime::now();
-        let hash1 =
-            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
-        let hash2 =
-            Hash::from_hex("ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100")?;
+        let hash1 = Hash::from_hex(TEST_HASH_HEX)?;
+        let hash2 = Hash::from_hex(ALT_HASH_HEX)?;
 
-        parent_cache.insert(&path1, modified, hash1);
-        child_cache.insert(&path2, modified, hash2);
+        parent_cache.insert_entry(&path1, CacheEntry::new(hash1, 0, modified));
+        child_cache.insert_entry(&path2, CacheEntry::new(hash2, 0, modified));
 
         parent_cache.merge(&child_cache);
 
         // Verify parent has both
-        assert!(parent_cache.get(&path1, modified).is_some());
+        assert!(parent_cache._get(&path1, 0, modified).is_some());
 
         let adjusted_path2 = PathBuf::from("sub").join(&path2);
-        let retrieved_hash2 = parent_cache.get(&adjusted_path2, modified);
+        let retrieved_hash2 = parent_cache._get(&adjusted_path2, 0, modified);
         assert_eq!(retrieved_hash2, Some(hash2));
 
         // Verify child cache path is in merged_child_caches
@@ -635,13 +807,12 @@ mod tests {
         }
 
         // Test "self wins" on conflict
-        let hash_conflict =
-            Hash::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")?;
-        child_cache.insert(&path2, modified, hash_conflict);
+        let hash_conflict = Hash::from_hex(CONFLICT_HASH_HEX)?;
+        child_cache.insert_entry(&path2, CacheEntry::new(hash_conflict, 0, modified));
 
         parent_cache.merge(&child_cache);
 
-        let retrieved = parent_cache.get(&adjusted_path2, modified);
+        let retrieved = parent_cache._get(&adjusted_path2, 0, modified);
         assert_eq!(retrieved, Some(hash2));
 
         Ok(())
@@ -658,16 +829,18 @@ mod tests {
 
         let path = PathBuf::from("file.txt");
         let modified = SystemTime::now();
-        let hash =
-            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
+        let hash = Hash::from_hex(TEST_HASH_HEX)?;
 
-        child_cache.insert(&path, modified, hash);
+        child_cache.insert_entry(&path, CacheEntry::new(hash, 0, modified));
         child_cache.save()?;
 
         let child_cache_path = subdir.join(FileHashCache::FILE_NAME);
         assert!(child_cache_path.is_file());
 
-        parent_cache.insert(&PathBuf::from("sub").join(&path), modified, hash);
+        parent_cache.insert_entry(
+            &PathBuf::from("sub").join(&path),
+            CacheEntry::new(hash, 0, modified),
+        );
         parent_cache.save()?;
 
         assert!(!parent_cache.state.lock().unwrap().is_dirty);
@@ -692,21 +865,36 @@ mod tests {
         let dir = tempdir()?;
         let cache = FileHashCache::new(dir.path());
         let path = PathBuf::from("test.txt");
-        let hash =
-            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
+        let hash = Hash::from_hex(TEST_HASH_HEX)?;
         let time = UNIX_EPOCH + Duration::new(12345, 67890);
-        cache.insert(&path, time, hash);
+        cache.insert_entry(&path, CacheEntry::new(hash, 0, time));
 
         // Lookup with exact time should work
-        assert!(cache.get(&path, time).is_some());
+        assert!(cache._get(&path, 0, time).is_some());
 
         // Lookup with time differing by less than 100ns should work
-        assert!(cache.get(&path, time.add(Duration::new(0, 10))).is_some());
-        assert!(cache.get(&path, time.sub(Duration::new(0, 90))).is_some());
+        assert!(
+            cache
+                ._get(&path, 0, time.add(Duration::new(0, 10)))
+                .is_some()
+        );
+        assert!(
+            cache
+                ._get(&path, 0, time.sub(Duration::new(0, 90)))
+                .is_some()
+        );
 
         // Lookup with time differing by 100ns or more should fail
-        assert!(cache.get(&path, time.add(Duration::new(0, 100))).is_none());
-        assert!(cache.get(&path, time.sub(Duration::new(0, 100))).is_none());
+        assert!(
+            cache
+                ._get(&path, 0, time.add(Duration::new(0, 100)))
+                .is_none()
+        );
+        assert!(
+            cache
+                ._get(&path, 0, time.sub(Duration::new(0, 100)))
+                .is_none()
+        );
 
         Ok(())
     }
@@ -716,42 +904,46 @@ mod tests {
         let dir = tempdir()?;
         let cache = FileHashCache::new(dir.path());
 
-        let path1 = PathBuf::from("keep.txt");
-        let path2 = PathBuf::from("remove.txt");
-        let modified = SystemTime::now();
-        let hash =
-            Hash::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")?;
-        cache.insert(&path1, modified, hash);
-        cache.insert(&path2, modified, hash);
+        let rel_path1 = Path::new("keep.txt");
+        let rel_path2 = Path::new("remove.txt");
+        let path1 = dir.path().join(rel_path1);
+        let path2 = dir.path().join(rel_path2);
+        fs::write(&path1, "keep")?;
+        fs::write(&path2, "remove")?;
+        let file1 = FileItem::try_from(path1.as_path())?;
+        let file2 = FileItem::try_from(path2.as_path())?;
+        let hash = Hash::from_hex(TEST_HASH_HEX)?;
+        cache.insert(rel_path1, &file1, hash);
+        cache.insert(rel_path2, &file2, hash);
         {
             // Initially, the flag should be false
             let state = cache.state.lock().unwrap();
-            assert!(!state.entries.get(&path1).unwrap().is_remove_if_no_access);
-            assert!(!state.entries.get(&path2).unwrap().is_remove_if_no_access);
+            assert!(!state.entries.get(rel_path1).unwrap().is_remove_if_no_access);
+            assert!(!state.entries.get(rel_path2).unwrap().is_remove_if_no_access);
         }
 
         // Set the flag
         cache.set_remove_if_no_access(Path::new(""));
         {
             let state = cache.state.lock().unwrap();
-            assert!(state.entries.get(&path1).unwrap().is_remove_if_no_access);
-            assert!(state.entries.get(&path2).unwrap().is_remove_if_no_access);
+            assert!(state.entries.get(rel_path1).unwrap().is_remove_if_no_access);
+            assert!(state.entries.get(rel_path2).unwrap().is_remove_if_no_access);
         }
 
         // Access path1 (get should reset flag)
-        assert!(cache.get(&path1, modified).is_some());
+        assert!(cache.get(rel_path1, &file1).is_some());
         {
             let state = cache.state.lock().unwrap();
-            assert!(!state.entries.get(&path1).unwrap().is_remove_if_no_access);
-            assert!(state.entries.get(&path2).unwrap().is_remove_if_no_access);
+            assert!(!state.entries.get(rel_path1).unwrap().is_remove_if_no_access);
+            assert!(state.entries.get(rel_path2).unwrap().is_remove_if_no_access);
         }
 
         // Save should remove path2 from the cache but keep path1
         cache.save()?;
         {
             let state = cache.state.lock().unwrap();
-            assert!(state.entries.contains_key(&path1));
-            assert!(!state.entries.contains_key(&path2));
+            assert!(state.entries.contains_key(rel_path1));
+            assert!(!state.entries.contains_key(rel_path2));
         }
 
         Ok(())
