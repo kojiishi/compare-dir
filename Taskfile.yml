@@ -10,6 +10,7 @@ tasks:
     - task: tests
     - task: lints
     - task: fmtchk
+    - git diff --exit-code
 
   fix: cargo clippy --fix {{.TARGET}} {{.FEATURE}} {{.CLIPPY}} {{.CLI_ARGS}}
   fmt: cargo fmt {{.FMT}} {{.CLI_ARGS}}
@@ -18,6 +19,7 @@ tasks:
   test:
     cmds:
       - cargo test {{.TARGET}} {{.FEATURE}} {{.TEST}} {{.CLI_ARGS}}
+      - cargo test --doc {{.TEST}} {{.CLI_ARGS}}
     env:
       RUST_BACKTRACE: 1
 
