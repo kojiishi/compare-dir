@@ -273,7 +273,7 @@ impl FileHasher {
         let path_in_cache = file.relative_path(cache.base_dir());
         match cache.get_entry(path_in_cache) {
             Some(cached) => {
-                if !update && file.size() != cached.size {
+                if !update && cached.size != 0 && file.size() != cached.size {
                     let base_dir = &self.dirs[0];
                     let rel_path = file.relative_path(base_dir);
                     tx.send(CheckEvent::Result(rel_path.into(), CheckStatus::Modified))?;
