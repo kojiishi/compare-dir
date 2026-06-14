@@ -783,6 +783,42 @@ mod tests {
         Ok(())
     }
 
+    #[derive(Default)]
+    struct CheckCollector {
+        start_seen: bool,
+        total_files: Option<u64>,
+        results: Vec<(PathBuf, CheckStatus)>,
+        file_done_count: u64,
+        num_error: usize,
+    }
+
+    impl CheckCollector {
+        fn collect(rx: mpsc::Receiver<CheckEvent>, base_dir: &Path) -> Self {
+            let mut collector = Self::default();
+            collector._collect(rx, base_dir);
+            collector
+        }
+
+        fn _collect(&mut self, rx: mpsc::Receiver<CheckEvent>, base_dir: &Path) {
+            while let Ok(event) = rx.recv() {
+                match event {
+                    CheckEvent::StartChecking => self.start_seen = true,
+                    CheckEvent::Total(total) => self.total_files = Some(total.num_files),
+                    CheckEvent::Result(file, status, _size) => {
+                        let stripped = file.path().strip_prefix(base_dir).unwrap().to_path_buf();
+                        self.results.push((stripped, status));
+                    }
+                    CheckEvent::Progress(progress_val) => {
+                        self.file_done_count += progress_val.num_files;
+                    }
+                    CheckEvent::Error(_) => {
+                        self.num_error += 1;
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn check_mode_empty_cache() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
@@ -797,30 +833,13 @@ mod tests {
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, false)?;
-        let mut results = Vec::new();
-        let mut start_seen = false;
-        let mut total_files = None;
-        let mut file_done_count = 0;
-        let mut num_error = 0;
-        while let Ok(event) = rx.recv() {
-            match event {
-                CheckEvent::StartChecking => start_seen = true,
-                CheckEvent::Total(total) => total_files = Some(total.num_files),
-                CheckEvent::Result(file, status, _size) => {
-                    results.push((file.into_path_buf(), status))
-                }
-                CheckEvent::Progress(progress_val) => file_done_count += progress_val.num_files,
-                CheckEvent::Error(_) => num_error += 1,
-            }
-        }
-        assert!(start_seen);
-        assert_eq!(total_files, Some(2));
-        assert_eq!(file_done_count, 0);
-        assert_eq!(num_error, 0);
+        let collector = CheckCollector::collect(rx, &dir_path);
+        assert!(collector.start_seen);
+        assert_eq!(collector.total_files, Some(2));
+        assert_eq!(collector.file_done_count, 0);
+        assert_eq!(collector.num_error, 0);
 
-        for result in &mut results {
-            result.0 = result.0.strip_prefix(&dir_path).unwrap().into();
-        }
+        let mut results = collector.results;
         results.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(results.len(), 2);
         assert_eq!(results[0], (PathBuf::from("file1.txt"), CheckStatus::New));
@@ -852,17 +871,9 @@ mod tests {
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, false)?;
-        let mut results = Vec::new();
-        let mut file_done_count = 0;
-        while let Ok(event) = rx.recv() {
-            match event {
-                CheckEvent::Result(path, status, _size) => results.push((path, status)),
-                CheckEvent::Progress(progress_val) => file_done_count += progress_val.num_files,
-                _ => {}
-            }
-        }
-        assert_eq!(results.len(), 0);
-        assert_eq!(file_done_count, 2);
+        let collector = CheckCollector::collect(rx, &dir_path);
+        assert_eq!(collector.results.len(), 0);
+        assert_eq!(collector.file_done_count, 2);
 
         fs::write(&file1_path, "content 1 modified")?;
 
@@ -878,26 +889,14 @@ mod tests {
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, false)?;
-        let mut results = Vec::new();
-        let mut file_done_count = 0;
-        while let Ok(event) = rx.recv() {
-            match event {
-                CheckEvent::Result(file, status, _size) => {
-                    results.push((file.into_path_buf(), status))
-                }
-                CheckEvent::Progress(progress_val) => file_done_count += progress_val.num_files,
-                _ => {}
-            }
-        }
-        assert_eq!(results.len(), 1);
-        for result in &mut results {
-            result.0 = result.0.strip_prefix(&dir_path).unwrap().into();
-        }
+        let collector = CheckCollector::collect(rx, &dir_path);
+        assert_eq!(collector.results.len(), 1);
+        let results = collector.results;
         assert_eq!(
             results[0],
             (PathBuf::from("file1.txt"), CheckStatus::Modified)
         );
-        assert_eq!(file_done_count, 1);
+        assert_eq!(collector.file_done_count, 1);
         Ok(())
     }
 
@@ -912,7 +911,7 @@ mod tests {
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, true)?;
-        while rx.recv().is_ok() {}
+        let _ = CheckCollector::collect(rx, &dir_path);
         hasher.save_cache()?;
         assert!(dir.path().join(FileHashCache::FILE_NAME).exists());
 
@@ -929,7 +928,7 @@ mod tests {
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, true)?;
-        while rx.recv().is_ok() {}
+        let _ = CheckCollector::collect(rx, &dir_path);
         hasher.save_cache()?;
 
         let cache = FileHashCache::new(&dir_path);
@@ -952,7 +951,7 @@ mod tests {
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, true)?;
-        while rx.recv().is_ok() {}
+        let _ = CheckCollector::collect(rx, &dir_path);
         hasher.save_cache()?;
 
         let cache = FileHashCache::new(&dir_path);
@@ -979,7 +978,7 @@ mod tests {
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, true)?;
-        while rx.recv().is_ok() {}
+        let _ = CheckCollector::collect(rx, &dir_path);
         hasher.save_cache()?;
 
         // Verify both are in the cache
@@ -995,7 +994,7 @@ mod tests {
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
         hasher.check_streaming(tx, true)?;
-        while rx.recv().is_ok() {}
+        let _ = CheckCollector::collect(rx, &dir_path);
         hasher.save_cache()?;
 
         // Verify file2 is removed from cache, but file1 is still there
