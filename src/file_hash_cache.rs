@@ -36,6 +36,11 @@ impl CacheEntry {
         }
     }
 
+    #[inline]
+    fn is_v0(&self, file: &FileItem) -> bool {
+        self.size == 0 && file.size() != 0
+    }
+
     fn _eq(&self, size: u64, modified: SystemTime) -> bool {
         (self.size == 0 || self.size == size) && self.modified.eq_nearly(modified)
     }
@@ -46,9 +51,9 @@ impl CacheEntry {
 
     pub(crate) fn should_update(&self, file: &FileItem, update: bool) -> bool {
         if update {
-            self.size == 0 || !self.eq(file)
+            self.is_v0(file) || !self.eq(file)
         } else {
-            self.size == 0 && self.modified.eq_nearly(file.modified())
+            self.is_v0(file) && self.modified.eq_nearly(file.modified())
         }
     }
 }
