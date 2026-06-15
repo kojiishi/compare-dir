@@ -182,15 +182,11 @@ impl FileComparisonResult {
 
     pub(crate) fn print(&self, output_format: OutputFormat, dir1_name: &str, dir2_name: &str) {
         match output_format {
-            OutputFormat::Default => {
-                if !self.is_identical() {
-                    println!(
-                        "{}: {}",
-                        self.relative_path.display(),
-                        self.to_string(dir1_name, dir2_name)
-                    )
-                }
-            }
+            OutputFormat::Default => println!(
+                "{}: {}",
+                self.relative_path.display(),
+                self.to_string(dir1_name, dir2_name)
+            ),
             OutputFormat::Symbol => println!(
                 "{} {}",
                 self.to_symbol_string(),

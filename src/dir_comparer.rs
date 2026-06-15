@@ -104,9 +104,11 @@ impl DirectoryComparer {
                     }
                     CompareProgress::Result(_, result) => {
                         summary.update(&result);
-                        progress.suspend_for(stdout(), || {
-                            result.print(self.output_format, dir1_str, dir2_str)
-                        });
+                        if !(self.output_format == OutputFormat::Default && result.is_identical()) {
+                            progress.suspend_for(stdout(), || {
+                                result.print(self.output_format, dir1_str, dir2_str)
+                            });
+                        }
                     }
                     CompareProgress::Progress(value) => progress.inc(value),
                     CompareProgress::Error => summary.num_errors += 1,
@@ -312,16 +314,8 @@ impl DirectoryComparer {
         let should_compare_content = self.comparison_method != FileComparisonMethod::Size;
         result.update(&comparer, should_compare_content)?;
         let file1_str = file1_path.to_str().unwrap_or("file1");
-        match self.output_format {
-            OutputFormat::Symbol => {
-                println!("{} {}", result.to_symbol_string(), file1_str);
-            }
-            OutputFormat::Default => {
-                let file2_str = file2_path.to_str().unwrap_or("file2");
-                println!("{}: {}", file1_str, result.to_string(file1_str, file2_str));
-            }
-            _ => unreachable!(),
-        }
+        let file2_str = file2_path.to_str().unwrap_or("file2");
+        result.print(self.output_format, file1_str, file2_str);
         Self::save_hashers(hashers)?;
         Ok(())
     }
