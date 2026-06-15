@@ -52,16 +52,17 @@ impl<'a> FileComparer<'a> {
         if len1 != len2 {
             return Ok(false);
         }
-        if len1 == 0 {
-            return Ok(true);
-        }
-
         if let Some((hasher1, hasher2)) = self.hashers {
             let (hash1, hash2) = rayon::join(
                 || hasher1.get_hash(self.file1),
                 || hasher2.get_hash(self.file2),
             );
             return Ok(hash1? == hash2?);
+        }
+        if len1 == 0 {
+            // Early return after checking the hash, to ensure the hash cache is
+            // updated even if the size is 0.
+            return Ok(true);
         }
 
         let start_time = std::time::Instant::now();
