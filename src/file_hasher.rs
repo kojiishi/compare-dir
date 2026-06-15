@@ -567,7 +567,7 @@ impl FileHasher {
         progress.finish();
         self.num_hashed.fetch_add(1, atomic::Ordering::Relaxed);
         let hash = hasher.finalize();
-        log::debug!(
+        log::trace!(
             "Computed hash in {}: '{}'",
             FormattedDuration(start_time.elapsed()),
             file

@@ -247,6 +247,7 @@ impl FileHashCache {
 
     /// Sets `should_remove_if_no_access` flag in all entries under the specified path.
     pub fn set_remove_if_no_access(&self, path: &Path) {
+        log::debug!("Set remove_if_no_access for '{}'", path.display());
         assert!(path.is_relative());
         let mut state = self.state.lock().unwrap();
         if path.as_os_str().is_empty() {
