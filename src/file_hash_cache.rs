@@ -921,7 +921,7 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_if_no_access() -> anyhow::Result<()> {
+    fn remove_if_no_access() -> anyhow::Result<()> {
         let dir = tempdir()?;
         let cache = FileHashCache::new(dir.path());
 
@@ -939,24 +939,27 @@ mod tests {
         {
             // Initially, the flag should be false
             let state = cache.state.lock().unwrap();
-            assert!(!state.entries.get(rel_path1).unwrap().is_remove_if_no_access);
-            assert!(!state.entries.get(rel_path2).unwrap().is_remove_if_no_access);
+            let get_entry = |p| state.entries.get(p).unwrap();
+            assert!(!get_entry(rel_path1).is_remove_if_no_access);
+            assert!(!get_entry(rel_path2).is_remove_if_no_access);
         }
 
         // Set the flag
         cache.set_remove_if_no_access(Path::new(""));
         {
             let state = cache.state.lock().unwrap();
-            assert!(state.entries.get(rel_path1).unwrap().is_remove_if_no_access);
-            assert!(state.entries.get(rel_path2).unwrap().is_remove_if_no_access);
+            let get_entry = |p| state.entries.get(p).unwrap();
+            assert!(get_entry(rel_path1).is_remove_if_no_access);
+            assert!(get_entry(rel_path2).is_remove_if_no_access);
         }
 
         // Access path1 (get should reset flag)
         assert!(cache.get(rel_path1, &file1).is_some());
         {
             let state = cache.state.lock().unwrap();
-            assert!(!state.entries.get(rel_path1).unwrap().is_remove_if_no_access);
-            assert!(state.entries.get(rel_path2).unwrap().is_remove_if_no_access);
+            let get_entry = |p| state.entries.get(p).unwrap();
+            assert!(!get_entry(rel_path1).is_remove_if_no_access);
+            assert!(get_entry(rel_path2).is_remove_if_no_access);
         }
 
         // Save should remove path2 from the cache but keep path1
@@ -966,7 +969,86 @@ mod tests {
             assert!(state.entries.contains_key(rel_path1));
             assert!(!state.entries.contains_key(rel_path2));
         }
+        Ok(())
+    }
 
+    #[test]
+    fn remove_if_no_access_sub_dir() -> anyhow::Result<()> {
+        // Subdirectory tests
+        let dir = tempdir()?;
+        let cache = FileHashCache::new(dir.path());
+        let hash = Hash::from_hex(TEST_HASH_HEX)?;
+
+        let sub_dir_path = Path::new("dir1");
+        let path_buf_in_sub = sub_dir_path.join("file_in_sub.txt");
+        let path_buf_outside = Path::new("keep_outside.txt");
+        let path_buf_starts_with_dir1 = Path::new("dir1.txt");
+        let path_buf_in_dir12 = Path::new("dir12").join("file.txt");
+        let path_buf_in_dir1_extra = Path::new("dir1_extra").join("file.txt");
+
+        let path_in_sub: &Path = &path_buf_in_sub;
+        let path_outside: &Path = path_buf_outside;
+        let path_starts_with_dir1: &Path = path_buf_starts_with_dir1;
+        let path_in_dir12: &Path = &path_buf_in_dir12;
+        let path_in_dir1_extra: &Path = &path_buf_in_dir1_extra;
+
+        let abs_path_in_sub = dir.path().join(path_in_sub);
+        let abs_outside = dir.path().join(path_outside);
+        let abs_starts_with_dir1 = dir.path().join(path_starts_with_dir1);
+        let abs_in_dir12 = dir.path().join(path_in_dir12);
+        let abs_in_dir1_extra = dir.path().join(path_in_dir1_extra);
+
+        fs::create_dir_all(abs_path_in_sub.parent().unwrap())?;
+        fs::create_dir_all(abs_in_dir12.parent().unwrap())?;
+        fs::create_dir_all(abs_in_dir1_extra.parent().unwrap())?;
+        fs::write(&abs_path_in_sub, "sub")?;
+        fs::write(&abs_outside, "outside")?;
+        fs::write(&abs_starts_with_dir1, "starts_with_dir1")?;
+        fs::write(&abs_in_dir12, "in_dir12")?;
+        fs::write(&abs_in_dir1_extra, "in_dir1_extra")?;
+
+        let file_in_sub = FileItem::try_from(abs_path_in_sub.as_path())?;
+        let file_outside = FileItem::try_from(abs_outside.as_path())?;
+        let file_starts_with_dir1 = FileItem::try_from(abs_starts_with_dir1.as_path())?;
+        let file_in_dir12 = FileItem::try_from(abs_in_dir12.as_path())?;
+        let file_in_dir1_extra = FileItem::try_from(abs_in_dir1_extra.as_path())?;
+        cache.insert(path_in_sub, &file_in_sub, hash);
+        cache.insert(path_outside, &file_outside, hash);
+        cache.insert(path_starts_with_dir1, &file_starts_with_dir1, hash);
+        cache.insert(path_in_dir12, &file_in_dir12, hash);
+        cache.insert(path_in_dir1_extra, &file_in_dir1_extra, hash);
+        {
+            // Initially, flags should be false
+            let state = cache.state.lock().unwrap();
+            let get_entry = |p| state.entries.get(p).unwrap();
+            assert!(!get_entry(path_in_sub).is_remove_if_no_access);
+            assert!(!get_entry(path_outside).is_remove_if_no_access);
+            assert!(!get_entry(path_starts_with_dir1).is_remove_if_no_access);
+            assert!(!get_entry(path_in_dir12).is_remove_if_no_access);
+            assert!(!get_entry(path_in_dir1_extra).is_remove_if_no_access);
+        }
+        // Set the flag for the subdirectory "dir1"
+        cache.set_remove_if_no_access(sub_dir_path);
+        {
+            let state = cache.state.lock().unwrap();
+            let get_entry = |p| state.entries.get(p).unwrap();
+            // Only path_in_sub should have is_remove_if_no_access set to true
+            assert!(get_entry(path_in_sub).is_remove_if_no_access);
+            assert!(!get_entry(path_outside).is_remove_if_no_access);
+            assert!(!get_entry(path_starts_with_dir1).is_remove_if_no_access);
+            assert!(!get_entry(path_in_dir12).is_remove_if_no_access);
+            assert!(!get_entry(path_in_dir1_extra).is_remove_if_no_access);
+        }
+        // Save should remove path_in_sub from the cache but keep all others
+        cache.save()?;
+        {
+            let state = cache.state.lock().unwrap();
+            assert!(!state.entries.contains_key(path_in_sub));
+            assert!(state.entries.contains_key(path_outside));
+            assert!(state.entries.contains_key(path_starts_with_dir1));
+            assert!(state.entries.contains_key(path_in_dir12));
+            assert!(state.entries.contains_key(path_in_dir1_extra));
+        }
         Ok(())
     }
 }
