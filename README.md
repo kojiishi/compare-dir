@@ -211,6 +211,54 @@ compare-dir -o yaml -c dup <dir> | yq -o json
 
 [yq]: https://github.com/mikefarah/yq
 
+## Backup Strategies
+[backup]: #backup-strategies
+
+When backing up, there are two strategies you can take.
+
+### Strategy 1: Exclude `.hash_cache`
+
+1. Back up by excluding the [hash cache] file.
+   ```shell-session
+   rsync -av --delete --exclude .hash_cache /path/to/source /path/to/backup
+   ```
+   On Windows, using `robocopy`:
+   ```shell-session
+   robocopy \path\to\source \path\to\backup /MIR /XF .hash_cache
+   ```
+
+2. Use `compare-dir <dir1> <dir2>` to verify.
+   ```shell-session
+   compare-dir /path/to/source/ /path/to/backup/
+   ```
+3. If you want to check backup files are not changed or corrupted
+   since the last comparison,
+   run `compare-dir -c check`.
+   ```shell-session
+   compare-dir -c check /path/to/backup
+   ```
+
+This method is suitable for incremental backups,
+as the step 2 computes hashes only for updated files.
+
+This strategy is recommended in general.
+
+### Strategy 2: Include `.hash_cache`
+
+1. Update the cache in the source directory.
+   ```shell-session
+   compare-dir -c update /path/to/source
+   ```
+2. Include `.hash_cache` when backing up,
+   including the [hash cache] file.
+   ```shell-session
+   rsync -av --delete /path/to/source/ /path/to/backup/
+   ```
+3. Use `compare-dir -c check <backup-dir>` to verify.
+   ```shell-session
+   compare-dir -c check /path/to/backup
+   ```
+
 ## Hash
 
 `compare-dir` uses the [blake3] hash algorithm.
@@ -264,51 +312,6 @@ dir1/dir2/file: Contents differ
 > invalidates the hash cache only for the file,
 > retaining hash caches for other files in the directory
 > and its sub directories.
-
-### Backup Strategy
-[backup]: #backup-strategy
-
-When backing up, there are two strategies you can take.
-
-#### Strategy 1: Exclude `.hash_cache`
-
-1. Exclude `.hash_cache` when backing up.
-   ```shell-session
-   rsync -av --delete --exclude .hash_cache /path/to/source /path/to/backup
-   ```
-   On Windows, using `robocopy`:
-   ```shell-session
-   robocopy \path\to\source \path\to\backup /MIR /XF .hash_cache
-   ```
-
-2. Use `compare-dir <dir1> <dir2>` to verify.
-   ```shell-session
-   compare-dir /path/to/source/ /path/to/backup/
-   ```
-3. If you want to check backup files are not changed or corrupted
-   since the last comparison,
-   run `compare-dir -c check`.
-   ```shell-session
-   compare-dir -c check /path/to/backup
-   ```
-
-This method is suitable for incremental backups,
-as the step 2 computes hashes only for updated files.
-
-#### Strategy 2: Include `.hash_cache`
-
-1. Update the cache in the source directory.
-   ```shell-session
-   compare-dir -c update /path/to/source
-   ```
-2. Include `.hash_cache` when backing up.
-   ```shell-session
-   rsync -av --delete /path/to/source/ /path/to/backup/
-   ```
-3. Use `compare-dir -c check <backup-dir>` to verify.
-   ```shell-session
-   compare-dir -c check /path/to/backup
-   ```
 
 ### Hash Cache Directory
 [Hash Cache Directory]: #hash-cache-directory
