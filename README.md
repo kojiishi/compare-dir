@@ -218,7 +218,7 @@ When backing up, there are two strategies you can take.
 
 ### Strategy 1: Exclude `.hash_cache`
 
-1. Back up by excluding the [hash cache] file.
+1. Backup by excluding the [hash cache] file.
    ```shell-session
    rsync -av --delete --exclude .hash_cache /path/to/source /path/to/backup
    ```
@@ -226,14 +226,12 @@ When backing up, there are two strategies you can take.
    ```shell-session
    robocopy \path\to\source \path\to\backup /MIR /XF .hash_cache
    ```
-
 2. Use `compare-dir <dir1> <dir2>` to verify.
    ```shell-session
    compare-dir /path/to/source/ /path/to/backup/
    ```
-3. If you want to check backup files are not changed or corrupted
-   since the last comparison,
-   run `compare-dir -c check`.
+3. Check backup files are not changed or corrupted
+   since the last comparison (step 2 above).
    ```shell-session
    compare-dir -c check /path/to/backup
    ```
@@ -241,20 +239,17 @@ When backing up, there are two strategies you can take.
 This method is suitable for incremental backups,
 as the step 2 computes hashes only for updated files.
 
-This strategy is recommended in general.
-
 ### Strategy 2: Include `.hash_cache`
 
-1. Update the cache in the source directory.
+1. Update the [hash cache] in the source directory.
    ```shell-session
    compare-dir -c update /path/to/source
    ```
-2. Include `.hash_cache` when backing up,
-   including the [hash cache] file.
+2. Backup all files, including the [hash cache] file.
    ```shell-session
    rsync -av --delete /path/to/source/ /path/to/backup/
    ```
-3. Use `compare-dir -c check <backup-dir>` to verify.
+3. Verify that the hashes of the backup files match the cached hashes.
    ```shell-session
    compare-dir -c check /path/to/backup
    ```
