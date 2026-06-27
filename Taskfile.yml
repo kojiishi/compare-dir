@@ -8,10 +8,16 @@ tasks:
 
   check:
     - task: tests
+    - task: doc
     - task: lints
     - task: fmtchk
     - git diff --exit-code
 
+  doc:
+    cmds:
+      - cargo doc {{.FEATURE}} {{.DOC}} {{.CLI_ARGS}}
+    env:
+      RUSTDOCFLAGS: "{{.RUSTDOC}}"
   fix: cargo clippy --fix {{.TARGET}} {{.FEATURE}} {{.CLIPPY}} {{.CLI_ARGS}}
   fmt: cargo fmt {{.FMT}} {{.CLI_ARGS}}
   fmtchk: cargo fmt --check {{.FMT}} {{.CLI_ARGS}}
@@ -49,8 +55,10 @@ tasks:
 
 vars:
   CLIPPY: '-- -Dwarnings'
+  DOC: --no-deps --workspace --document-private-items
   FEATURE: ''
   FEATURES: ['']
   FMT: '--all'
+  RUSTDOC: -Dwarnings
   TARGET: '--all-targets'
   TEST: ''
