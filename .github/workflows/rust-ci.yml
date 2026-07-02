@@ -28,7 +28,7 @@ jobs:
 
       # https://taskfile.dev/docs/installation
       - name: Install Task
-        uses: go-task/setup-task@v1
+        uses: go-task/setup-task@v2
 
       - name: Build
         run: cargo build
