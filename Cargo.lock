@@ -179,7 +179,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "compare-dir"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "anyhow",
  "blake3",
@@ -690,9 +690,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "simple-path"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a19c8b93ce852807edbcd6b05e71cec50c079b438eb97922d795c19a25040dc1"
+checksum = "f53b92f5af26b6a95fee27b898ba7b439adfcf237b793f50be100d677e26bb78"
 dependencies = [
  "anyhow",
  "dunce",

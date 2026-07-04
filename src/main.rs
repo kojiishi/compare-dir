@@ -166,7 +166,7 @@ fn ensure_absolute_path(path: &mut PathBuf) -> anyhow::Result<()> {
     // `canonicalize` instead of `absolute` to ensure cache paths match on case
     // insensitive file systems.
     let simple = SimplePath {
-        map_to_drive: !path.as_os_str().as_encoded_bytes().starts_with(br"\\"),
+        map_to_drive: !SimplePath::is_unc(&path),
         ..Default::default()
     };
     *path = simple.canonicalize(&path)?;
