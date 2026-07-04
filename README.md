@@ -35,7 +35,7 @@ See [Releases] for the change history.
 
 ## Usages
 
-`compare-dir` supports the following features:
+`compare-dir` supports following features:
 
 * [Compare Directories]
 * [Find Changed or Corrupted Files][find changed files]
@@ -47,12 +47,13 @@ to specify the feature.
 
 | `--compare` | Meaning |
 | --- | --- |
-| full | [Compare directories]. Files contents are compared byte-by-byte. |
-| hash | [Compare directories]. Files contents are compared by their hashes. |
-| rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
+| auto (default) | Same as `check` if single argument, `hash` if two arguments. |
 | size | [Compare directories]. Files are compared only by file sizes. |
+| hash | [Compare directories]. Files contents are compared by their [hashes][hash]. |
+| rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
+| full | [Compare directories]. Files contents are compared byte-by-byte. |
 | check | [Find changed or corrupted Files][find changed files]. |
-| update | Same as `check`, but [update the hash cache][update]. |
+| update | Same as `check`, but also [update the hash cache][update]. |
 | dup | [Find duplicated files]. |
 
 ### Compare Directories
@@ -264,6 +265,7 @@ as the step 2 computes hashes only for updated files.
    ```
 
 ## Hash
+[hash]: #hash
 
 `compare-dir` uses the [blake3] hash algorithm.
 

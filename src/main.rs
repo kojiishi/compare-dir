@@ -9,6 +9,7 @@ use std::{env, io::Write, path::PathBuf, sync::Arc};
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
 enum CompareMethod {
+    Auto,
     Size,
     Hash,
     Rehash,
@@ -46,7 +47,7 @@ struct Args {
     paths: Vec<PathBuf>,
 
     /// Method for comparing files.
-    #[arg(short, long, default_value = "hash")]
+    #[arg(short, long, default_value = "auto")]
     compare: CompareMethod,
 
     /// Patterns to exclude.
@@ -146,7 +147,7 @@ fn main() -> anyhow::Result<()> {
     }
     init_logger(args.verbose, &progress);
     args.ensure_absolute_paths()?;
-    Cli::new(args, progress).main()
+    Cli::new(args, progress).run()
 }
 
 struct Cli {
@@ -162,8 +163,17 @@ impl Cli {
         }
     }
 
-    fn main(&mut self) -> anyhow::Result<()> {
-        match self.args.compare {
+    fn run(&mut self) -> anyhow::Result<()> {
+        self.run_method(self.args.compare.clone())
+    }
+
+    fn run_method(&mut self, method: CompareMethod) -> anyhow::Result<()> {
+        match method {
+            CompareMethod::Auto => match self.args.paths.len() {
+                1 => self.run_method(CompareMethod::Check),
+                2 => self.run_method(CompareMethod::Hash),
+                _ => anyhow::bail!("Please specify the `-c` option."),
+            },
             CompareMethod::Size => self.compare(FileComparisonMethod::Size),
             CompareMethod::Hash => self.compare(FileComparisonMethod::Hash),
             CompareMethod::Rehash => self.compare(FileComparisonMethod::Rehash),
