@@ -75,6 +75,26 @@ struct Args {
 }
 
 impl Args {
+    /// Ensure paths are absolute. It helps when computing relative paths and
+    /// walking ancestors.
+    fn ensure_absolute_paths(&mut self) -> anyhow::Result<()> {
+        for path in &mut self.paths {
+            Self::ensure_absolute_path(path)?;
+        }
+        Ok(())
+    }
+
+    fn ensure_absolute_path(path: &mut PathBuf) -> anyhow::Result<()> {
+        // `canonicalize` instead of `absolute` to ensure cache paths match on case
+        // insensitive file systems.
+        let simple = SimplePath {
+            map_to_drive: !SimplePath::is_unc(&path),
+            ..Default::default()
+        };
+        *path = simple.canonicalize(&path)?;
+        Ok(())
+    }
+
     fn output_format(&self) -> OutputFormat {
         if self.out == CliOutputFormat::Default && self.symbol {
             return OutputFormat::Symbol;
@@ -84,9 +104,10 @@ impl Args {
 
     /// Builds a GlobSet for exclusion patterns, including default patterns.
     ///
-    /// If the resulting list of patterns is empty (either initially or after a user-provided
-    /// empty pattern clears all defaults), this function returns `Ok(None)`. Otherwise, it
-    /// returns `Ok(Some(GlobSet))` containing the compiled glob patterns.
+    /// If the resulting list of patterns is empty (either initially or after a
+    /// user-provided empty pattern clears all defaults), this function returns
+    /// `Ok(None)`. Otherwise, it returns `Ok(Some(GlobSet))` containing the
+    /// compiled glob patterns.
     fn build_exclude(&self) -> anyhow::Result<Option<GlobSet>> {
         let mut patterns = vec![
             ".hash_cache",
@@ -117,8 +138,15 @@ impl Args {
 }
 
 fn main() -> anyhow::Result<()> {
-    let mut cli = Cli::new();
-    cli.main()
+    let mut args = Args::parse();
+    let mut progress = ProgressBuilder::new();
+    if args.verbose > 0 {
+        progress.is_file_enabled = true;
+        args.verbose -= 1;
+    }
+    init_logger(args.verbose, &progress);
+    args.ensure_absolute_paths()?;
+    Cli::new(args, progress).main()
 }
 
 struct Cli {
@@ -127,28 +155,14 @@ struct Cli {
 }
 
 impl Cli {
-    fn new() -> Self {
+    fn new(args: Args, progress: ProgressBuilder) -> Self {
         Self {
-            args: Args::parse(),
-            progress: None,
+            args,
+            progress: Some(progress),
         }
     }
 
     fn main(&mut self) -> anyhow::Result<()> {
-        let mut progress = ProgressBuilder::new();
-        if self.args.verbose > 0 {
-            progress.is_file_enabled = true;
-            self.args.verbose -= 1;
-        }
-        init_logger(self.args.verbose, &progress);
-        self.progress = Some(progress);
-
-        // Ensure paths are absolute. It helps when computing relative paths and
-        // walking ancestors.
-        for path in &mut self.args.paths {
-            ensure_absolute_path(path)?;
-        }
-
         match self.args.compare {
             CompareMethod::Size => self.compare(FileComparisonMethod::Size),
             CompareMethod::Hash => self.compare(FileComparisonMethod::Hash),
@@ -208,15 +222,4 @@ fn init_logger(verbose: u8, progress: &ProgressBuilder) {
             });
     }
     progress.init_logger(builder.build()).unwrap();
-}
-
-fn ensure_absolute_path(path: &mut PathBuf) -> anyhow::Result<()> {
-    // `canonicalize` instead of `absolute` to ensure cache paths match on case
-    // insensitive file systems.
-    let simple = SimplePath {
-        map_to_drive: !SimplePath::is_unc(&path),
-        ..Default::default()
-    };
-    *path = simple.canonicalize(&path)?;
-    Ok(())
 }
