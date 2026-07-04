@@ -81,6 +81,39 @@ impl Args {
         }
         OutputFormat::from(self.out)
     }
+
+    /// Builds a GlobSet for exclusion patterns, including default patterns.
+    ///
+    /// If the resulting list of patterns is empty (either initially or after a user-provided
+    /// empty pattern clears all defaults), this function returns `Ok(None)`. Otherwise, it
+    /// returns `Ok(Some(GlobSet))` containing the compiled glob patterns.
+    fn build_exclude(&self) -> anyhow::Result<Option<GlobSet>> {
+        let mut patterns = vec![
+            ".hash_cache",
+            "Thumbs.db",
+            "System Volume Information",
+            ".DS_Store",
+            ".apdisk",
+        ];
+        for pattern in &self.exclude {
+            if pattern.is_empty() {
+                // If an empty pattern is given, clear all default excludes
+                // and any previously added CLI patterns.
+                patterns.clear();
+            } else {
+                patterns.push(pattern);
+            }
+        }
+        log::info!("Exclude: {:?}", patterns);
+        if patterns.is_empty() {
+            return Ok(None);
+        }
+        let mut builder = GlobSetBuilder::new();
+        for pattern in patterns {
+            builder.add(GlobBuilder::new(pattern).case_insensitive(true).build()?);
+        }
+        Ok(Some(builder.build()?))
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -123,7 +156,7 @@ fn compare_main(
     let mut comparer = DirectoryComparer::new(dir1, dir2);
     comparer.buffer_size = args.buffer * 1024;
     comparer.comparison_method = comparison_method;
-    comparer.exclude = build_exclude(&args.exclude)?;
+    comparer.exclude = args.build_exclude()?;
     comparer.output_format = args.output_format();
     comparer.jobs = args.jobs;
     comparer.progress = Some(Arc::new(progress));
@@ -136,7 +169,7 @@ fn build_hasher(args: Args, progress: ProgressBuilder) -> anyhow::Result<FileHas
     }
     let mut hasher = FileHasher::new(&args.paths)?;
     hasher.buffer_size = args.buffer * 1024;
-    hasher.exclude = build_exclude(&args.exclude)?;
+    hasher.exclude = args.build_exclude()?;
     hasher.output_format = args.output_format();
     hasher.jobs = args.jobs;
     hasher.progress = Some(Arc::new(progress));
@@ -171,37 +204,4 @@ fn ensure_absolute_path(path: &mut PathBuf) -> anyhow::Result<()> {
     };
     *path = simple.canonicalize(&path)?;
     Ok(())
-}
-
-/// Builds a GlobSet for exclusion patterns, including default patterns.
-///
-/// If the resulting list of patterns is empty (either initially or after a user-provided
-/// empty pattern clears all defaults), this function returns `Ok(None)`. Otherwise, it
-/// returns `Ok(Some(GlobSet))` containing the compiled glob patterns.
-fn build_exclude(excludes: &[String]) -> anyhow::Result<Option<GlobSet>> {
-    let mut patterns = vec![
-        ".hash_cache",
-        "Thumbs.db",
-        "System Volume Information",
-        ".DS_Store",
-        ".apdisk",
-    ];
-    for pattern in excludes {
-        if pattern.is_empty() {
-            // If an empty pattern is given, clear all default excludes
-            // and any previously added CLI patterns.
-            patterns.clear();
-        } else {
-            patterns.push(pattern);
-        }
-    }
-    log::info!("Exclude: {:?}", patterns);
-    if patterns.is_empty() {
-        return Ok(None);
-    }
-    let mut builder = GlobSetBuilder::new();
-    for pattern in patterns {
-        builder.add(GlobBuilder::new(pattern).case_insensitive(true).build()?);
-    }
-    Ok(Some(builder.build()?))
 }
