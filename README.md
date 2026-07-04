@@ -41,6 +41,20 @@ See [Releases] for the change history.
 * [Find Changed or Corrupted Files][find changed files]
 * [Find Duplicated Files]
 
+[`--compare` option]: #compare
+Please use the <span id="compare">`--compare` (`-c` for short) option</span>
+to specify the feature.
+
+| `--compare` | Meaning |
+| --- | --- |
+| full | [Compare directories]. Files contents are compared byte-by-byte. |
+| hash | [Compare directories]. Files contents are compared by their hashes. |
+| rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
+| size | [Compare directories]. Files are compared only by file sizes. |
+| check | [Find changed or corrupted Files][find changed files]. |
+| update | Same as `check`, but [update the hash cache][update]. |
+| dup | [Find duplicated files]. |
+
 ### Compare Directories
 [compare directories]: #compare-directories
 
@@ -70,15 +84,7 @@ but comparing [hashes](#hash) is faster
 if you compare them multiple times
 because hashes are saved in the [hash cache].
 
-The `--compare` (or `-c`) option can change
-how files are compared.
-
-| `--compare` | Meaning |
-| --- | --- |
-| size | Compare only by file sizes. |
-| hash | Compare file contents by their hashes. |
-| rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
-| full | Compare file contents byte-by-byte. |
+Please see the [`--compare` option] to change how files are compared.
 
 #### Output Formats
 [output format]: #output-formats
@@ -158,7 +164,7 @@ Then the `-c check` option can find changed files.
 ```shell-session
 compare-dir -c check <dir>
 ```
-This prints the same output as [compare directories],
+This prints the same [output format] as [compare directories],
 as if it compares the current files
 against the files when the [hash cache] was created.
 For example, with the `-s` option (the [output format] is [symbols]):
@@ -172,12 +178,15 @@ This means that:
 * `file2` became newer and larger.
 * `file3` became newer and different content, but the size didn't change.
 
+<a id="update"></a>
 The `-c check` option doesn't update the [hash cache],
 so that you can run it multiple times.
 If you want to update the [hash cache],
 please use `-c update` option instead.
 This option prints the same output as `-c check`,
 but also updates the [hash cache].
+
+[update]: #update
 
 ### Find Duplicated Files
 [find duplicated files]: #find-duplicated-files
