@@ -614,18 +614,22 @@ impl DuplicatedFiles {
     fn write_yaml(&self, mut writer: impl io::Write) -> anyhow::Result<()> {
         writeln!(writer, "- paths:")?;
         for path in &self.paths {
-            writeln!(writer, "  - {:?}", path)?;
+            writeln!(writer, "  - '{}'", Self::escape_quotes_by_double(path))?;
         }
         writeln!(writer, "  size: {}", self.size)?;
         Ok(())
     }
 
     fn write_shell(&self, writer: impl io::Write) -> anyhow::Result<()> {
-        self.write_shell_with(writer, "cp", Self::escape_shell)
+        self.write_shell_with(writer, "cp", Self::escape_quotes_for_shell)
     }
 
     fn write_pwsh(&self, writer: impl io::Write) -> anyhow::Result<()> {
-        self.write_shell_with(writer, "Copy-Item -LiteralPath", Self::escape_shell_double)
+        self.write_shell_with(
+            writer,
+            "Copy-Item -LiteralPath",
+            Self::escape_quotes_by_double,
+        )
     }
 
     fn write_shell_with(
@@ -644,12 +648,15 @@ impl DuplicatedFiles {
         Ok(())
     }
 
-    fn escape_shell(path: &Path) -> String {
-        path.to_string_lossy().replace('\'', "\'\\'\'")
+    /// Escape single quotes for sh.
+    fn escape_quotes_for_shell(path: &Path) -> String {
+        path.to_string_lossy().replace('\'', "'\\''")
     }
 
-    fn escape_shell_double(path: &Path) -> String {
-        path.to_string_lossy().replace('\'', "\'\'")
+    /// Escape single quotes by doubling them,
+    /// for single quoted strings in zsh, PowerShell, YAML, etc.
+    fn escape_quotes_by_double(path: &Path) -> String {
+        path.to_string_lossy().replace('\'', "''")
     }
 }
 
@@ -1049,13 +1056,13 @@ mod tests {
 
     #[test]
     fn escape_shell() {
-        let escape_shell = |p: &str| DuplicatedFiles::escape_shell(Path::new(p));
+        let escape_shell = |p: &str| DuplicatedFiles::escape_quotes_for_shell(Path::new(p));
         assert_eq!(escape_shell(""), "");
         assert_eq!(escape_shell("abc"), "abc");
         assert_eq!(escape_shell("a'b"), "a'\\''b");
         assert_eq!(escape_shell("a'b'"), "a'\\''b'\\''");
 
-        let escape_shell_double = |p: &str| DuplicatedFiles::escape_shell_double(Path::new(p));
+        let escape_shell_double = |p: &str| DuplicatedFiles::escape_quotes_by_double(Path::new(p));
         assert_eq!(escape_shell_double(""), "");
         assert_eq!(escape_shell_double("abc"), "abc");
         assert_eq!(escape_shell_double("a'b"), "a''b");
