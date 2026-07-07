@@ -241,13 +241,19 @@ When backing up, there are two strategies you can take.
    compare-dir /path/to/source/ /path/to/backup/
    ```
 3. Check backup files are not changed or corrupted
-   since the last comparison (step 2 above).
+   since the last comparison.
    ```shell-session
    compare-dir -c check /path/to/backup
    ```
 
 This method is suitable for incremental backups,
 as the step 2 computes hashes only for updated files.
+
+The step 3 verifies files that are not supposed to change;
+i.e., whose metadata (size and last modified time) are not changed,
+since the last time their hashes are computed.
+This step runs only in the backup directory,
+without causing any I/O to the source directory.
 
 ### Strategy 2: Include `.hash_cache`
 
