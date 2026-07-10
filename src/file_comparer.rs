@@ -153,11 +153,7 @@ impl FileComparisonResult {
     }
 
     pub(crate) fn update_moodified(&mut self, t1: SystemTime, t2: SystemTime) {
-        self.modified_time_comparison = Some(if t1.eq_nearly(t2) {
-            Ordering::Equal
-        } else {
-            t1.cmp(&t2)
-        })
+        self.modified_time_comparison = Some(t1.cmp_nearly(t2));
     }
 
     pub(crate) fn update_size(&mut self, s1: u64, s2: u64) {
