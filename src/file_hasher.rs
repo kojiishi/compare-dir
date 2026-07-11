@@ -34,7 +34,7 @@ enum DupEvent {
 enum CheckEvent {
     StartChecking,
     Total(ProgressValue),
-    Result(FileComparisonResult, ProgressValue),
+    Result(FileComparisonResult),
     Progress(ProgressValue),
     Error(FileItem),
 }
@@ -140,6 +140,9 @@ impl FileHasher {
             anyhow::bail!("Check mode only supports one directory.");
         }
         let start_time = time::Instant::now();
+        if let Some(p) = &self.progress {
+            p.set_propagate();
+        }
         let progress = self
             .progress
             .as_ref()
@@ -166,8 +169,7 @@ impl FileHasher {
                         progress.set_length(value);
                         progress.set_message("");
                     }
-                    CheckEvent::Result(result, value) => {
-                        progress.inc(value);
+                    CheckEvent::Result(result) => {
                         progress.suspend_for(stdout(), || {
                             result.print(self.output_format, "cached", "current")
                         });
@@ -177,9 +179,7 @@ impl FileHasher {
                             num_modified += 1;
                         }
                     }
-                    CheckEvent::Progress(value) => {
-                        progress.inc(value);
-                    }
+                    CheckEvent::Progress(value) => progress.inc(value),
                     CheckEvent::Error(file) => {
                         progress.inc(ProgressValue::with_skip(file.size()));
                         num_error += 1;
@@ -286,10 +286,8 @@ impl FileHasher {
                     result.update_size(cached.size, file.size());
                 }
                 if !update && cached.size != 0 && file.size() != cached.size {
-                    tx.send(CheckEvent::Result(
-                        result,
-                        ProgressValue::with_skip(file.size()),
-                    ))?;
+                    tx.send(CheckEvent::Result(result))?;
+                    tx.send(CheckEvent::Progress(ProgressValue::with_skip(file.size())))?;
                     return Ok(());
                 }
                 let hash = self.compute_hash(file)?;
@@ -298,26 +296,24 @@ impl FileHasher {
                     if cached.should_update(file, update) {
                         cache.insert(path_in_cache, file, hash);
                     }
-                    tx.send(CheckEvent::Progress(ProgressValue::with_size(file.size())))?;
                 } else {
                     if update {
                         cache.insert(path_in_cache, file, hash);
                     }
-                    tx.send(CheckEvent::Result(
-                        result,
-                        ProgressValue::with_size(file.size()),
-                    ))?;
+                    tx.send(CheckEvent::Result(result))?;
                 }
             }
             None => {
                 if update {
                     let hash = self.compute_hash(file)?;
                     cache.insert(path_in_cache, file, hash);
+                } else {
+                    tx.send(CheckEvent::Progress(ProgressValue::with_skip(file.size())))?;
                 }
-                tx.send(CheckEvent::Result(
-                    FileComparisonResult::new(file.path().into(), Classification::OnlyInDir2),
-                    ProgressValue::with_size(file.size()),
-                ))?;
+                tx.send(CheckEvent::Result(FileComparisonResult::new(
+                    file.path().into(),
+                    Classification::OnlyInDir2,
+                )))?;
             }
         }
         Ok(())
@@ -562,8 +558,9 @@ impl FileHasher {
                     break;
                 }
                 hasher.update(&buf[..n]);
-                progress.inc(ProgressValue::with_size(n as u64));
+                progress.inc_size(n as u64);
             }
+            progress.inc_file(1);
         }
         progress.finish();
         self.num_hashed.fetch_add(1, atomic::Ordering::Relaxed);
@@ -814,7 +811,7 @@ mod tests {
                 match event {
                     CheckEvent::StartChecking => self.start_seen = true,
                     CheckEvent::Total(total) => self.total_files = Some(total.num_files),
-                    CheckEvent::Result(mut result, _size) => {
+                    CheckEvent::Result(mut result) => {
                         result.relative_path = result
                             .relative_path
                             .strip_prefix(base_dir)
@@ -850,7 +847,7 @@ mod tests {
         let collector = CheckCollector::collect(rx, &dir_path);
         assert!(collector.start_seen);
         assert_eq!(collector.total_files, Some(2));
-        assert_eq!(collector.file_done_count, 0);
+        assert_eq!(collector.file_done_count, 2);
         assert_eq!(collector.num_error, 0);
 
         let mut results = collector.results;
@@ -889,7 +886,7 @@ mod tests {
         hasher.check_streaming(tx, false)?;
         let collector = CheckCollector::collect(rx, &dir_path);
         assert_eq!(collector.results.len(), 0);
-        assert_eq!(collector.file_done_count, 2);
+        assert_eq!(collector.file_done_count, 0);
 
         fs::write(&file1_path, "content 1 modified")?;
 
