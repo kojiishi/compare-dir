@@ -19,6 +19,7 @@ pub(crate) use file_iterator::FileIterator;
 pub(crate) use progress::Progress;
 pub use progress::ProgressBuilder;
 pub(crate) use progress::ProgressValue;
+pub(crate) use progress::SharedProgress;
 pub(crate) use sort_stream::sort_stream;
 pub(crate) use system_time_ext::SystemTimeExt;
 
