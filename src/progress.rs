@@ -2,6 +2,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
 use std::io::{IsTerminal, stderr};
 use std::path::Path;
+use std::sync::atomic::{self, AtomicBool};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -20,12 +21,16 @@ pub(crate) struct ProgressValue {
 }
 
 impl ProgressValue {
+    pub(crate) fn with_file_and_size(num_files: u64, size: u64) -> Self {
+        Self { size, num_files }
+    }
+
     pub(crate) fn with_size(size: u64) -> Self {
-        Self { size, num_files: 1 }
+        Self::with_file_and_size(1, size)
     }
 
     pub(crate) fn with_skip(size: u64) -> Self {
-        Self { size, num_files: 1 }
+        Self::with_file_and_size(1, size)
     }
 }
 
@@ -54,16 +59,19 @@ pub(crate) struct Progress {
     use_bytes: bool,
     len: Option<ProgressValue>,
     multi: Option<MultiProgress>,
-    #[allow(dead_code)]
     primary: Weak<Mutex<Progress>>,
 }
 
 impl Progress {
     pub fn none() -> Self {
+        Self::none_with_primary(Weak::new())
+    }
+
+    fn none_with_primary(primary: Weak<Mutex<Progress>>) -> Self {
         Self {
             inner: None,
             multi: None,
-            primary: Weak::new(),
+            primary,
             ..Default::default()
         }
     }
@@ -118,6 +126,19 @@ impl Progress {
     pub fn inc(&mut self, amount: ProgressValue) {
         self.pos += amount;
         self.update_position();
+        if let Some(primary_arc) = self.primary.upgrade() {
+            primary_arc.lock().unwrap().inc(amount);
+        }
+    }
+
+    pub fn inc_size(&mut self, size: u64) {
+        let amount = ProgressValue::with_file_and_size(0, size);
+        self.inc(amount);
+    }
+
+    pub fn inc_file(&mut self, num_files: u64) {
+        let amount = ProgressValue::with_file_and_size(num_files, 0);
+        self.inc(amount);
     }
 
     pub fn set_length(&mut self, len: ProgressValue) {
@@ -134,6 +155,9 @@ impl Progress {
     }
 
     pub fn finish(&self) {
+        if let Some(len) = self.len {
+            assert_eq!(self.pos, len);
+        }
         if let Some(inner) = &self.inner {
             inner.finish();
             if let Some(multi) = &self.multi {
@@ -204,6 +228,7 @@ pub struct ProgressBuilder {
     multi: MultiProgress,
     pub is_enabled: bool,
     pub is_file_enabled: bool,
+    is_propagate: AtomicBool,
     primary: Mutex<Weak<Mutex<Progress>>>,
 }
 
@@ -213,6 +238,7 @@ impl Default for ProgressBuilder {
             multi: MultiProgress::default(),
             is_enabled: stderr().is_terminal(),
             is_file_enabled: false,
+            is_propagate: AtomicBool::new(false),
             primary: Mutex::new(Weak::new()),
         }
     }
@@ -228,6 +254,14 @@ impl ProgressBuilder {
         LogWrapper::new(self.multi.clone(), logger).try_init()?;
         log::set_max_level(max_level);
         Ok(())
+    }
+
+    pub(crate) fn is_propagate(&self) -> bool {
+        self.is_propagate.load(atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn set_propagate(&self) {
+        self.is_propagate.store(true, atomic::Ordering::Relaxed);
     }
 
     pub(crate) fn add_primary(&self) -> SharedProgress {
@@ -251,9 +285,18 @@ impl ProgressBuilder {
     }
 
     pub(crate) fn add_file(&self, path: &Path, file_size: u64) -> Progress {
-        if !self.is_enabled || !self.is_file_enabled {
+        if !self.is_enabled {
             return Progress::none();
         }
+        let primary = if self.is_propagate() {
+            Weak::clone(&self.primary.lock().unwrap())
+        } else {
+            Weak::new()
+        };
+        if !self.is_file_enabled {
+            return Progress::none_with_primary(primary);
+        }
+
         let inner = self.multi.add(ProgressBar::new(file_size));
         inner.set_style(ProgressStyle::with_template(FILE_STYLE).unwrap());
         if let Some(parent) = path.parent()
@@ -267,13 +310,48 @@ impl ProgressBuilder {
         } else {
             inner.set_message(path.to_string_lossy().to_string());
         }
-        let primary = self.primary.lock().unwrap().clone();
         Progress {
             inner: Some(inner),
             multi: Some(self.multi.clone()),
             use_bytes: true,
             primary,
             ..Default::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn propagate() {
+        let builder = ProgressBuilder {
+            is_enabled: true,
+            is_file_enabled: false,
+            ..Default::default()
+        };
+        builder.set_propagate();
+        let _primary = builder.add_primary();
+
+        // Add a file progress
+        let file_path = Path::new("dummy.txt");
+        let mut file_progress = builder.add_file(file_path, 100);
+
+        // Initially primary position is 0
+        {
+            let prim = builder.primary.lock().unwrap().upgrade().unwrap();
+            assert_eq!(prim.lock().unwrap().pos.size, 0);
+        }
+
+        // Increment file progress
+        file_progress.inc(ProgressValue::with_size(10));
+
+        // Primary progress should be incremented to 10
+        {
+            let prim = builder.primary.lock().unwrap().upgrade().unwrap();
+            assert_eq!(prim.lock().unwrap().pos.size, 10);
+            assert_eq!(prim.lock().unwrap().pos.num_files, 1);
         }
     }
 }
