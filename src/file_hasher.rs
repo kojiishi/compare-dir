@@ -1,6 +1,7 @@
 use crate::{
     Classification, ColumnFormatter, DirectoryComparer, FileComparer, FileComparisonResult,
     FileHashCache, FileItem, FileIterator, OutputFormat, Progress, ProgressBuilder, ProgressValue,
+    SharedProgress,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
@@ -139,11 +140,11 @@ impl FileHasher {
             anyhow::bail!("Check mode only supports one directory.");
         }
         let start_time = time::Instant::now();
-        let mut progress = self
+        let progress = self
             .progress
             .as_ref()
-            .map(|progress| progress.add_spinner())
-            .unwrap_or_else(Progress::none);
+            .map(|progress| progress.add_primary())
+            .unwrap_or_else(SharedProgress::none);
         progress.use_bytes();
         progress.set_message("Scanning directory...");
         let mut num_new = 0;
@@ -363,11 +364,11 @@ impl FileHasher {
 
     /// Finds duplicated files and returns a list of duplicate groups.
     pub fn find_duplicates(&self) -> anyhow::Result<Vec<DuplicatedFiles>> {
-        let mut progress = self
+        let progress = self
             .progress
             .as_ref()
-            .map(|progress| progress.add_spinner())
-            .unwrap_or_else(Progress::none);
+            .map(|progress| progress.add_primary())
+            .unwrap_or_else(SharedProgress::none);
         progress.set_message("Scanning directories...");
 
         let (tx, rx) = mpsc::channel();

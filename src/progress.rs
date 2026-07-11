@@ -2,6 +2,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
 use std::io::{IsTerminal, stderr};
 use std::path::Path;
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 const SPINNER_STYLE0: &str = "{elapsed_precise} {spinner:.green} ";
@@ -53,6 +54,8 @@ pub(crate) struct Progress {
     use_bytes: bool,
     len: Option<ProgressValue>,
     multi: Option<MultiProgress>,
+    #[allow(dead_code)]
+    primary: Weak<Mutex<Progress>>,
 }
 
 impl Progress {
@@ -60,6 +63,7 @@ impl Progress {
         Self {
             inner: None,
             multi: None,
+            primary: Weak::new(),
             ..Default::default()
         }
     }
@@ -155,11 +159,52 @@ impl Progress {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct SharedProgress {
+    inner: Arc<Mutex<Progress>>,
+}
+
+impl SharedProgress {
+    pub fn none() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Progress::none())),
+        }
+    }
+
+    pub fn set_message(&self, msg: impl Into<String>) {
+        self.inner.lock().unwrap().set_message(msg);
+    }
+
+    pub fn inc(&self, amount: ProgressValue) {
+        self.inner.lock().unwrap().inc(amount);
+    }
+
+    pub fn set_length(&self, len: ProgressValue) {
+        self.inner.lock().unwrap().set_length(len);
+    }
+
+    pub fn use_bytes(&self) {
+        self.inner.lock().unwrap().use_bytes();
+    }
+
+    pub fn finish(&self) {
+        self.inner.lock().unwrap().finish();
+    }
+
+    pub fn suspend_for<F, R, S: IsTerminal>(&self, stream: S, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        self.inner.lock().unwrap().suspend_for(stream, f)
+    }
+}
+
 #[derive(Debug)]
 pub struct ProgressBuilder {
     multi: MultiProgress,
     pub is_enabled: bool,
     pub is_file_enabled: bool,
+    primary: Mutex<Weak<Mutex<Progress>>>,
 }
 
 impl Default for ProgressBuilder {
@@ -168,6 +213,7 @@ impl Default for ProgressBuilder {
             multi: MultiProgress::default(),
             is_enabled: stderr().is_terminal(),
             is_file_enabled: false,
+            primary: Mutex::new(Weak::new()),
         }
     }
 }
@@ -184,19 +230,24 @@ impl ProgressBuilder {
         Ok(())
     }
 
-    pub(crate) fn add_spinner(&self) -> Progress {
+    pub(crate) fn add_primary(&self) -> SharedProgress {
         if !self.is_enabled {
-            return Progress::none();
+            return SharedProgress::none();
         }
         let inner = self.multi.add(ProgressBar::new_spinner());
         inner.enable_steady_tick(Duration::from_secs(1));
         let progress = Progress {
             inner: Some(inner),
             multi: Some(self.multi.clone()),
+            primary: Weak::new(),
             ..Default::default()
         };
         progress.update_style();
-        progress
+        let shared = SharedProgress {
+            inner: Arc::new(Mutex::new(progress)),
+        };
+        *self.primary.lock().unwrap() = Arc::downgrade(&shared.inner);
+        shared
     }
 
     pub(crate) fn add_file(&self, path: &Path, file_size: u64) -> Progress {
@@ -216,10 +267,12 @@ impl ProgressBuilder {
         } else {
             inner.set_message(path.to_string_lossy().to_string());
         }
+        let primary = self.primary.lock().unwrap().clone();
         Progress {
             inner: Some(inner),
             multi: Some(self.multi.clone()),
             use_bytes: true,
+            primary,
             ..Default::default()
         }
     }

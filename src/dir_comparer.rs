@@ -1,6 +1,6 @@
 use crate::{
     Classification, ColumnFormatter, FileComparer, FileComparisonResult, FileHasher, FileItem,
-    FileIterator, OutputFormat, Progress, ProgressBuilder, ProgressValue,
+    FileIterator, OutputFormat, ProgressBuilder, ProgressValue, SharedProgress,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
@@ -74,11 +74,11 @@ impl DirectoryComparer {
             return self.run_file_comparer();
         }
 
-        let mut progress = self
+        let progress = self
             .progress
             .as_ref()
-            .map(|progress| progress.add_spinner())
-            .unwrap_or_else(Progress::none);
+            .map(|progress| progress.add_primary())
+            .unwrap_or_else(SharedProgress::none);
         progress.set_message("Scanning directories...");
         let start_time = std::time::Instant::now();
         let mut summary = ComparisonSummary::default();
