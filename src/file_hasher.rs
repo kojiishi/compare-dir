@@ -1,7 +1,7 @@
 use crate::{
-    Classification, ColumnFormatter, DirectoryComparer, FileComparer, FileComparisonResult,
-    FileHashCache, FileItem, FileIterator, OutputFormat, Progress, ProgressBuilder, ProgressValue,
-    SharedProgress,
+    CheckMode, Classification, ColumnFormatter, DirectoryComparer, FileComparer,
+    FileComparisonResult, FileHashCache, FileItem, FileIterator, OutputFormat, Progress,
+    ProgressBuilder, ProgressValue, SharedProgress,
 };
 use globset::GlobSet;
 use indicatif::FormattedDuration;
@@ -131,7 +131,7 @@ impl FileHasher {
     }
 
     /// Executes the check/update process.
-    pub fn check(&self, update: bool) -> anyhow::Result<()> {
+    pub fn check(&self, mode: CheckMode) -> anyhow::Result<()> {
         match self.output_format {
             OutputFormat::Default | OutputFormat::Symbol => {}
             _ => anyhow::bail!("Check mode only supports default or symbol output format."),
@@ -156,7 +156,7 @@ impl FileHasher {
         std::thread::scope(|scope| {
             let (tx, rx) = mpsc::channel();
             scope.spawn(|| {
-                if let Err(e) = self.check_streaming(tx, update) {
+                if let Err(e) = self.check_streaming(tx, mode) {
                     log::error!("Error during check: {}", e);
                 }
             });
@@ -219,7 +219,7 @@ impl FileHasher {
         formatter.write_values(&mut writer, &summary[1..])
     }
 
-    fn check_streaming(&self, tx: mpsc::Sender<CheckEvent>, update: bool) -> anyhow::Result<()> {
+    fn check_streaming(&self, tx: mpsc::Sender<CheckEvent>, mode: CheckMode) -> anyhow::Result<()> {
         assert_eq!(self.dirs.len(), 1);
         let cache = self.new_cache()?;
         let base_dir = &self.dirs[0];
@@ -236,7 +236,7 @@ impl FileHasher {
             pool.scope(move |scope| -> anyhow::Result<()> {
                 let mut total = ProgressValue::default();
                 for file in it_rx {
-                    self.check_file(file, &cache, update, &mut total, &tx, scope);
+                    self.check_file(file, &cache, mode, &mut total, &tx, scope);
                 }
                 tx.send(CheckEvent::Total(total))?;
                 Ok(())
@@ -250,7 +250,7 @@ impl FileHasher {
         &'scope self,
         file: FileItem,
         cache: &Arc<FileHashCache>,
-        update: bool,
+        mode: CheckMode,
         total: &mut ProgressValue,
         tx: &mpsc::Sender<CheckEvent>,
         scope: &rayon::Scope<'scope>,
@@ -259,7 +259,7 @@ impl FileHasher {
         let tx = tx.clone();
         let cache = Arc::clone(cache);
         scope.spawn(move |_| {
-            if let Err(error) = self._check_file(&file, cache, update, &tx) {
+            if let Err(error) = self._check_file(&file, cache, mode, &tx) {
                 log::error!("Failed to check file '{}': {}", file, error);
                 if tx.send(CheckEvent::Error(file)).is_err() {
                     log::error!("Send failed");
@@ -272,20 +272,27 @@ impl FileHasher {
         &self,
         file: &FileItem,
         cache: Arc<FileHashCache>,
-        update: bool,
+        mode: CheckMode,
         tx: &mpsc::Sender<CheckEvent>,
     ) -> anyhow::Result<()> {
         assert!(file.path().is_absolute());
         let path_in_cache = file.relative_path(cache.base_dir());
         match cache.get_entry(path_in_cache) {
             Some(cached) => {
+                if mode == CheckMode::Update && cached.eq(file) {
+                    // In update mode, consider the content isn't changed if the
+                    // metadata is the same,
+                    tx.send(CheckEvent::Progress(ProgressValue::with_skip(file.size())))?;
+                    return Ok(());
+                }
                 let mut result =
                     FileComparisonResult::new(file.path().into(), Classification::InBoth);
                 result.update_moodified(cached.modified, file.modified());
                 if cached.size != 0 {
                     result.update_size(cached.size, file.size());
                 }
-                if !update && cached.size != 0 && file.size() != cached.size {
+                if mode == CheckMode::Check && cached.size != 0 && file.size() != cached.size {
+                    // In `Check` mode, hash isn't needed if the size is different.
                     tx.send(CheckEvent::Result(result))?;
                     tx.send(CheckEvent::Progress(ProgressValue::with_skip(file.size())))?;
                     return Ok(());
@@ -293,18 +300,18 @@ impl FileHasher {
                 let hash = self.compute_hash(file)?;
                 result.is_content_same = Some(hash == cached.hash);
                 if hash == cached.hash {
-                    if cached.should_update(file, update) {
+                    if cached.should_update(file, mode) {
                         cache.insert(path_in_cache, file, hash);
                     }
                 } else {
-                    if update {
+                    if mode == CheckMode::Update || mode == CheckMode::UpdateAll {
                         cache.insert(path_in_cache, file, hash);
                     }
                     tx.send(CheckEvent::Result(result))?;
                 }
             }
             None => {
-                if update {
+                if mode == CheckMode::Update || mode == CheckMode::UpdateAll {
                     let hash = self.compute_hash(file)?;
                     cache.insert(path_in_cache, file, hash);
                 } else {
@@ -843,7 +850,7 @@ mod tests {
         let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_streaming(tx, false)?;
+        hasher.check_streaming(tx, CheckMode::Check)?;
         let collector = CheckCollector::collect(rx, &dir_path);
         assert!(collector.start_seen);
         assert_eq!(collector.total_files, Some(2));
@@ -883,7 +890,7 @@ mod tests {
         let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_streaming(tx, false)?;
+        hasher.check_streaming(tx, CheckMode::Check)?;
         let collector = CheckCollector::collect(rx, &dir_path);
         assert_eq!(collector.results.len(), 0);
         assert_eq!(collector.file_done_count, 0);
@@ -901,7 +908,7 @@ mod tests {
         let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_streaming(tx, false)?;
+        hasher.check_streaming(tx, CheckMode::Check)?;
         let collector = CheckCollector::collect(rx, &dir_path);
         assert_eq!(collector.results.len(), 1);
         let results = collector.results;
@@ -923,7 +930,7 @@ mod tests {
         let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_streaming(tx, true)?;
+        hasher.check_streaming(tx, CheckMode::UpdateAll)?;
         let _ = CheckCollector::collect(rx, &dir_path);
         hasher.save_cache()?;
         assert!(dir.path().join(FileHashCache::FILE_NAME).exists());
@@ -940,7 +947,7 @@ mod tests {
         let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_streaming(tx, true)?;
+        hasher.check_streaming(tx, CheckMode::UpdateAll)?;
         let _ = CheckCollector::collect(rx, &dir_path);
         hasher.save_cache()?;
 
@@ -963,7 +970,7 @@ mod tests {
         let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_streaming(tx, true)?;
+        hasher.check_streaming(tx, CheckMode::UpdateAll)?;
         let _ = CheckCollector::collect(rx, &dir_path);
         hasher.save_cache()?;
 
@@ -990,7 +997,7 @@ mod tests {
         let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_streaming(tx, true)?;
+        hasher.check_streaming(tx, CheckMode::UpdateAll)?;
         let _ = CheckCollector::collect(rx, &dir_path);
         hasher.save_cache()?;
 
@@ -1006,7 +1013,7 @@ mod tests {
         let mut hasher = FileHasher::new(&[&dir_path])?;
         hasher.exclude = Some(default_exclude());
         let (tx, rx) = mpsc::channel();
-        hasher.check_streaming(tx, true)?;
+        hasher.check_streaming(tx, CheckMode::UpdateAll)?;
         let _ = CheckCollector::collect(rx, &dir_path);
         hasher.save_cache()?;
 
@@ -1048,7 +1055,45 @@ mod tests {
         fs::create_dir(&dir1)?;
         fs::create_dir(&dir2)?;
         let hasher = FileHasher::new(&[&dir1, &dir2])?;
-        assert!(hasher.check(false).is_err());
+        assert!(hasher.check(CheckMode::Check).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn check_update_mode_only_on_change() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let dir_path = dir.path().to_path_buf();
+        let file1_path = dir.path().join("file1.txt");
+        fs::write(&file1_path, "content 1")?;
+
+        // 1. Initial check under UpdateAll/Update (should compute hash and insert since new)
+        let mut hasher = FileHasher::new(&[&dir_path])?;
+        hasher.exclude = Some(default_exclude());
+        let (tx, rx) = mpsc::channel();
+        hasher.check_streaming(tx, CheckMode::Update)?;
+        let _ = CheckCollector::collect(rx, &dir_path);
+        hasher.save_cache()?;
+        assert_eq!(hasher.num_hashed.load(atomic::Ordering::Relaxed), 1);
+
+        // 2. Second check under Update. Since metadata is unchanged, it should be a no-op (0 hashes computed).
+        let mut hasher = FileHasher::new(&[&dir_path])?;
+        hasher.exclude = Some(default_exclude());
+        let (tx, rx) = mpsc::channel();
+        hasher.check_streaming(tx, CheckMode::Update)?;
+        let _ = CheckCollector::collect(rx, &dir_path);
+        assert_eq!(hasher.num_hashed.load(atomic::Ordering::Relaxed), 0);
+
+        // 3. Sleep, modify file, and check again under Update. Metadata changed, so it should update (1 hash computed).
+        std::thread::sleep(time::Duration::from_millis(10));
+        fs::write(&file1_path, "content 1 modified")?;
+
+        let mut hasher = FileHasher::new(&[&dir_path])?;
+        hasher.exclude = Some(default_exclude());
+        let (tx, rx) = mpsc::channel();
+        hasher.check_streaming(tx, CheckMode::Update)?;
+        let _ = CheckCollector::collect(rx, &dir_path);
+        assert_eq!(hasher.num_hashed.load(atomic::Ordering::Relaxed), 1);
+
         Ok(())
     }
 

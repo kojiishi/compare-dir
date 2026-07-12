@@ -53,7 +53,8 @@ to specify the feature.
 | rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
 | full | [Compare directories]. Files contents are compared byte-by-byte. |
 | check | [Find changed or corrupted Files][find changed files]. |
-| update | Same as `check`, but also [update the hash cache][update]. |
+| update | [Update the hash cache if metadata is changed or new][update]. |
+| update-all | Same as `check`, but also [update the hash cache][update]. |
 | dup | [Find duplicated files]. |
 
 ### Compare Directories
@@ -179,15 +180,26 @@ This means that:
 * `file2` became newer and larger.
 * `file3` became newer and different content, but the size didn't change.
 
+[update]: #update
 <a id="update"></a>
+
 The `-c check` option doesn't update the [hash cache],
 so that you can run it multiple times.
 If you want to update the [hash cache],
-please use `-c update` option instead.
-This option prints the same output as `-c check`,
-but also updates the [hash cache].
+please use the `-c update` or `-c update-all` option instead.
 
-[update]: #update
+The `-c update` option only updates the cache for files
+that are new or whose metadata (size, last modified time) has changed.
+Otherwise, it is a no-op and does not recompute hashes, which makes it fast.
+
+The `-c update-all` option always recomputes hashes
+and updates the cache for all files.
+
+| | `check` | `update` | `update-all` |
+| --- | --- | --- | --- |
+| Same metadata | Check hash | Skip | Update hash |
+| Different time | Check hash | Update Hash | Update Hash |
+| New or different size | Report-only | Update Hash | Update Hash |
 
 ### Find Duplicated Files
 [find duplicated files]: #find-duplicated-files
@@ -291,7 +303,8 @@ depending on the `--compare` option.
 | hash, dup | Used if modified time doesn't change, updated otherwise. |
 | rehash | Updated. |
 | check | Used. |
-| update | Used and updated. |
+| update | Used, and updated only if metadata changes. |
+| update-all | Updated for all files. |
 
 ### Invalidation
 [invalidation]: #invalidation

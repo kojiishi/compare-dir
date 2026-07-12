@@ -1,4 +1,4 @@
-use crate::{FileComparer, FileItem, SystemTimeExt};
+use crate::{CheckMode, FileComparer, FileItem, SystemTimeExt};
 use blake3::Hash;
 use indicatif::FormattedDuration;
 use simple_path::SimplePath;
@@ -49,11 +49,10 @@ impl CacheEntry {
         self._eq(file.size(), file.modified())
     }
 
-    pub(crate) fn should_update(&self, file: &FileItem, update: bool) -> bool {
-        if update {
-            self.is_v0(file) || !self.eq(file)
-        } else {
-            self.is_v0(file) && self.modified.eq_nearly(file.modified())
+    pub(crate) fn should_update(&self, file: &FileItem, mode: CheckMode) -> bool {
+        match mode {
+            CheckMode::UpdateAll | CheckMode::Update => self.is_v0(file) || !self.eq(file),
+            CheckMode::Check => self.is_v0(file) && self.modified.eq_nearly(file.modified()),
         }
     }
 }
