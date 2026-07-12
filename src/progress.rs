@@ -29,8 +29,22 @@ impl ProgressValue {
         Self::with_file_and_size(1, size)
     }
 
-    pub(crate) fn with_skip(size: u64) -> Self {
-        Self::with_file_and_size(1, size)
+    fn is_zero(&self) -> bool {
+        self.num_files == 0 && self.size == 0
+    }
+
+    fn saturating_sub(&self, other: &ProgressValue) -> Self {
+        Self {
+            num_files: self.num_files.saturating_sub(other.num_files),
+            size: self.size.saturating_sub(other.size),
+        }
+    }
+
+    fn assert_valid_for_len(&self, len: &ProgressValue) {
+        assert!(
+            self.num_files <= len.num_files && self.size <= len.size,
+            "pos: {self:?}, len: {len:?}"
+        );
     }
 }
 
@@ -57,9 +71,19 @@ pub(crate) struct Progress {
     inner: Option<ProgressBar>,
     pos: ProgressValue,
     use_bytes: bool,
+    is_finished: bool,
     len: Option<ProgressValue>,
     multi: Option<MultiProgress>,
     primary: Weak<Mutex<Progress>>,
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        if !self.is_finished {
+            self._inc_remaining();
+            self.finish();
+        }
+    }
 }
 
 impl Progress {
@@ -121,6 +145,7 @@ impl Progress {
 
     pub fn inc(&mut self, amount: ProgressValue) {
         self.pos += amount;
+        self.assert_pos();
         self.update_position();
         if let Some(primary) = self.primary.upgrade() {
             primary.lock().unwrap().inc(amount);
@@ -137,10 +162,30 @@ impl Progress {
         self.inc(amount);
     }
 
+    fn _inc_remaining(&mut self) {
+        self.assert_pos();
+        if let Some(len) = self.len {
+            let remaining = len.saturating_sub(&self.pos);
+            if !remaining.is_zero() {
+                log::debug!("remaining: {remaining:?}");
+                self.pos = len;
+                if let Some(primary) = self.primary.upgrade() {
+                    primary.lock().unwrap().inc(remaining);
+                }
+            }
+        }
+    }
+
     pub fn set_length(&mut self, len: ProgressValue) {
         self.len = Some(len);
         self.update_style();
         self.update_length();
+    }
+
+    fn assert_pos(&self) {
+        if let Some(len) = self.len {
+            self.pos.assert_valid_for_len(&len);
+        }
     }
 
     pub fn use_bytes(&mut self) {
@@ -150,7 +195,9 @@ impl Progress {
         self.update_position();
     }
 
-    pub fn finish(&self) {
+    pub fn finish(&mut self) {
+        assert!(!self.is_finished);
+        self.is_finished = true;
         if let Some(len) = self.len {
             assert_eq!(self.pos, len);
         }
@@ -310,6 +357,7 @@ impl ProgressBuilder {
             inner: Some(inner),
             multi: Some(self.multi.clone()),
             use_bytes: true,
+            len: Some(ProgressValue::with_size(file_size)),
             primary,
             ..Default::default()
         }
