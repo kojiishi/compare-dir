@@ -79,16 +79,14 @@ impl Progress {
     fn update_style(&self) {
         if let Some(inner) = &self.inner {
             let style = if self.len.is_some() {
-                if self.use_bytes {
-                    format!("{NORMAL_STYLE0}{NORMAL_STYLE1_SIZE}")
-                } else {
-                    format!("{NORMAL_STYLE0}{NORMAL_STYLE1_NUM}")
+                match self.use_bytes {
+                    true => format!("{NORMAL_STYLE0}{NORMAL_STYLE1_SIZE}"),
+                    false => format!("{NORMAL_STYLE0}{NORMAL_STYLE1_NUM}"),
                 }
             } else {
-                if self.use_bytes {
-                    format!("{SPINNER_STYLE0}{SPINNER_STYLE1_SIZE}")
-                } else {
-                    format!("{SPINNER_STYLE0}{SPINNER_STYLE1_NUM}")
+                match self.use_bytes {
+                    true => format!("{SPINNER_STYLE0}{SPINNER_STYLE1_SIZE}"),
+                    false => format!("{SPINNER_STYLE0}{SPINNER_STYLE1_NUM}"),
                 }
             };
             inner.set_style(ProgressStyle::with_template(&style).unwrap());
@@ -97,10 +95,9 @@ impl Progress {
 
     fn update_position(&self) {
         if let Some(inner) = &self.inner {
-            inner.set_position(if self.use_bytes {
-                self.pos.size
-            } else {
-                self.pos.num_files
+            inner.set_position(match self.use_bytes {
+                true => self.pos.size,
+                false => self.pos.num_files,
             });
         }
     }
@@ -109,10 +106,9 @@ impl Progress {
         if let Some(inner) = &self.inner
             && let Some(len) = self.len
         {
-            inner.set_length(if self.use_bytes {
-                len.size
-            } else {
-                len.num_files
+            inner.set_length(match self.use_bytes {
+                true => len.size,
+                false => len.num_files,
             });
         }
     }
@@ -126,8 +122,8 @@ impl Progress {
     pub fn inc(&mut self, amount: ProgressValue) {
         self.pos += amount;
         self.update_position();
-        if let Some(primary_arc) = self.primary.upgrade() {
-            primary_arc.lock().unwrap().inc(amount);
+        if let Some(primary) = self.primary.upgrade() {
+            primary.lock().unwrap().inc(amount);
         }
     }
 
