@@ -35,7 +35,6 @@ enum CheckEvent {
     StartChecking,
     Total(ProgressValue),
     Result(FileComparisonResult),
-    Progress(ProgressValue),
     Error(FileItem),
 }
 
@@ -179,11 +178,7 @@ impl FileHasher {
                             num_modified += 1;
                         }
                     }
-                    CheckEvent::Progress(value) => progress.inc(value),
-                    CheckEvent::Error(file) => {
-                        progress.inc(ProgressValue::with_skip(file.size()));
-                        num_error += 1;
-                    }
+                    CheckEvent::Error(_file) => num_error += 1,
                 }
             }
         });
@@ -276,13 +271,15 @@ impl FileHasher {
         tx: &mpsc::Sender<CheckEvent>,
     ) -> anyhow::Result<()> {
         assert!(file.path().is_absolute());
+        // Create `Progress` here so that its `drop` can advance the parent when
+        // errors occur, or when `compute_hash` is skipped.
+        let progress = self.create_file_progress(file);
         let path_in_cache = file.relative_path(cache.base_dir());
         match cache.get_entry(path_in_cache) {
             Some(cached) => {
                 if mode == CheckMode::Update && cached.eq(file) {
                     // In update mode, consider the content isn't changed if the
-                    // metadata is the same,
-                    tx.send(CheckEvent::Progress(ProgressValue::with_skip(file.size())))?;
+                    // metadata is the same.
                     return Ok(());
                 }
                 let mut result =
@@ -294,10 +291,9 @@ impl FileHasher {
                 if mode == CheckMode::Check && cached.size != 0 && file.size() != cached.size {
                     // In `Check` mode, hash isn't needed if the size is different.
                     tx.send(CheckEvent::Result(result))?;
-                    tx.send(CheckEvent::Progress(ProgressValue::with_skip(file.size())))?;
                     return Ok(());
                 }
-                let hash = self.compute_hash(file)?;
+                let hash = self.compute_hash_with_progress(file, progress)?;
                 result.is_content_same = Some(hash == cached.hash);
                 if hash == cached.hash {
                     if cached.should_update(file, mode) {
@@ -312,10 +308,8 @@ impl FileHasher {
             }
             None => {
                 if mode == CheckMode::Update || mode == CheckMode::UpdateAll {
-                    let hash = self.compute_hash(file)?;
+                    let hash = self.compute_hash_with_progress(file, progress)?;
                     cache.insert(path_in_cache, file, hash);
-                } else {
-                    tx.send(CheckEvent::Progress(ProgressValue::with_skip(file.size())))?;
                 }
                 tx.send(CheckEvent::Result(FileComparisonResult::new(
                     file.path().into(),
@@ -542,14 +536,24 @@ impl FileHasher {
         Ok((None, relative))
     }
 
-    fn compute_hash(&self, file: &FileItem) -> io::Result<blake3::Hash> {
-        let start_time = time::Instant::now();
-        let mut f = fs::File::open(file.path())?;
-        let mut progress = self
-            .progress
+    fn create_file_progress(&self, file: &FileItem) -> Progress {
+        self.progress
             .as_ref()
             .map(|progress| progress.add_file(file.path(), file.size()))
-            .unwrap_or_else(Progress::none);
+            .unwrap_or_else(Progress::none)
+    }
+
+    fn compute_hash(&self, file: &FileItem) -> io::Result<blake3::Hash> {
+        self.compute_hash_with_progress(file, self.create_file_progress(file))
+    }
+
+    fn compute_hash_with_progress(
+        &self,
+        file: &FileItem,
+        mut progress: Progress,
+    ) -> io::Result<blake3::Hash> {
+        let start_time = time::Instant::now();
+        let mut f = fs::File::open(file.path())?;
         let mut hasher = blake3::Hasher::new();
         if self.buffer_size == 0 {
             if file.size() > 0 {
@@ -802,7 +806,6 @@ mod tests {
         start_seen: bool,
         total_files: Option<u64>,
         results: Vec<FileComparisonResult>,
-        file_done_count: u64,
         num_error: usize,
     }
 
@@ -826,12 +829,7 @@ mod tests {
                             .to_path_buf();
                         self.results.push(result);
                     }
-                    CheckEvent::Progress(progress_val) => {
-                        self.file_done_count += progress_val.num_files;
-                    }
-                    CheckEvent::Error(_) => {
-                        self.num_error += 1;
-                    }
+                    CheckEvent::Error(_) => self.num_error += 1,
                 }
             }
         }
@@ -854,7 +852,6 @@ mod tests {
         let collector = CheckCollector::collect(rx, &dir_path);
         assert!(collector.start_seen);
         assert_eq!(collector.total_files, Some(2));
-        assert_eq!(collector.file_done_count, 2);
         assert_eq!(collector.num_error, 0);
 
         let mut results = collector.results;
@@ -893,7 +890,6 @@ mod tests {
         hasher.check_streaming(tx, CheckMode::Check)?;
         let collector = CheckCollector::collect(rx, &dir_path);
         assert_eq!(collector.results.len(), 0);
-        assert_eq!(collector.file_done_count, 0);
 
         fs::write(&file1_path, "content 1 modified")?;
 
@@ -916,7 +912,6 @@ mod tests {
         assert_eq!(results[0].modified_time_comparison, Some(Ordering::Less));
         assert_eq!(results[0].size_comparison, Some(Ordering::Less));
         assert_eq!(results[0].is_content_same, None);
-        assert_eq!(collector.file_done_count, 1);
         Ok(())
     }
 
