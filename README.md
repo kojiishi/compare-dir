@@ -49,9 +49,9 @@ to specify the feature.
 | --- | --- |
 | auto (default) | Same as `check` if single argument, `hash` if two arguments. |
 | size | [Compare directories]. Files are compared only by file sizes. |
-| hash | [Compare directories]. Files contents are compared by their [hashes][hash]. |
+| hash | [Compare directories]. File contents are compared by their [hashes][hash]. |
 | rehash | Same as `hash`, but recompute hashes without using the data in the [hash cache]. |
-| full | [Compare directories]. Files contents are compared byte-by-byte. |
+| full | [Compare directories]. File contents are compared byte-by-byte. |
 | check | [Find changed or corrupted Files][find changed files]. |
 | update | [Update the hash cache if metadata is changed or new][update]. |
 | update-all | Same as `check`, but also [update the hash cache][update]. |
@@ -152,7 +152,8 @@ by comparing hashes with the previously saved hashes in the [hash cache].
 This is useful when there could be possible corruptions,
 such as after unexpected power down or RAID rebuild.
 
-First, the [hash cache] needs to be created.
+First, a [hash cache] needs to be created.
+It acts as a snapshot of the directory.
 There are two ways to do this.
 * [Comparing directories][compare directories] creates it automatically,
   when it runs with the `-c hash` option (default).
