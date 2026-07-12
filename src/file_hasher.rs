@@ -399,7 +399,7 @@ impl FileHasher {
                             file.size(),
                             "Hash collision: sizes do not match"
                         );
-                        entry.paths.push(file.into_path_buf());
+                        entry.paths.push(file.into());
                     }
                     DupEvent::Error => {}
                 }
