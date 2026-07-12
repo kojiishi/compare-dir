@@ -37,6 +37,12 @@ impl TryFrom<&Path> for FileItem {
     }
 }
 
+impl From<FileItem> for PathBuf {
+    fn from(value: FileItem) -> Self {
+        value.path
+    }
+}
+
 impl Display for FileItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{}", self.path.display()))
@@ -48,6 +54,7 @@ impl FileItem {
         &self.path
     }
 
+    #[deprecated(note = "Please use `into` instead")]
     pub fn into_path_buf(self) -> PathBuf {
         self.path
     }
