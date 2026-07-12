@@ -33,6 +33,17 @@ pub enum OutputFormat {
     PowerShell,
 }
 
+/// Mode for checking files against the cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckMode {
+    /// Same as `!update` (does not update cache unless size is 0 and modified time is unchanged).
+    Check,
+    /// Update cache if metadata is changed or new, otherwise no-op.
+    Update,
+    /// Same as `update` (always recomputes hashes and updates cache).
+    UpdateAll,
+}
+
 use std::path::{Path, PathBuf};
 
 pub(crate) fn build_thread_pool(

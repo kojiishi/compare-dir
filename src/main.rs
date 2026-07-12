@@ -1,6 +1,6 @@
 use clap::{ArgAction, Parser};
 use compare_dir::{
-    DirectoryComparer, FileComparer, FileComparisonMethod, FileHasher, OutputFormat,
+    CheckMode, DirectoryComparer, FileComparer, FileComparisonMethod, FileHasher, OutputFormat,
     ProgressBuilder,
 };
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
@@ -16,6 +16,7 @@ enum CompareMethod {
     Full,
     Check,
     Update,
+    UpdateAll,
     Dup,
 }
 
@@ -178,8 +179,9 @@ impl Cli {
             CompareMethod::Hash => self.compare(FileComparisonMethod::Hash),
             CompareMethod::Rehash => self.compare(FileComparisonMethod::Rehash),
             CompareMethod::Full => self.compare(FileComparisonMethod::Full),
-            CompareMethod::Check => self.build_hasher()?.check(false),
-            CompareMethod::Update => self.build_hasher()?.check(true),
+            CompareMethod::Check => self.build_hasher()?.check(CheckMode::Check),
+            CompareMethod::Update => self.build_hasher()?.check(CheckMode::Update),
+            CompareMethod::UpdateAll => self.build_hasher()?.check(CheckMode::UpdateAll),
             CompareMethod::Dup => self.build_hasher()?.run(),
         }
     }
