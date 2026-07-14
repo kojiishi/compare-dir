@@ -200,45 +200,9 @@ impl DirectoryComparer {
                         Ordering::Equal => {
                             let file1 = cur1.take().unwrap();
                             let file2 = cur2.take().unwrap();
-                            let buffer_size = self.buffer_size;
-                            let tx_clone = tx.clone();
-                            let i = index;
-                            let should_compare =
-                                self.comparison_method != FileComparisonMethod::Size;
-                            let size = file1.size();
+                            let size = file2.size();
                             total += ProgressValue::with_size(size);
-                            scope.spawn(move |_| {
-                                let mut comparer = FileComparer::new(&file1, &file2);
-                                comparer.buffer_size = buffer_size;
-                                if let Some((h1, h2)) = hashers_ref {
-                                    comparer.hashers = Some((h1, h2));
-                                }
-                                let rel_path = file1.relative_path(&self.dir1);
-                                let mut result = FileComparisonResult::new(
-                                    rel_path.into(),
-                                    Classification::InBoth,
-                                );
-                                let event = match result.update(&comparer, should_compare) {
-                                    Ok(_) => CompareProgress::Result(i, result),
-                                    Err(error) => {
-                                        log::error!(
-                                            "Error comparing '{}': {}",
-                                            result.relative_path.display(),
-                                            error
-                                        );
-                                        CompareProgress::Error
-                                    }
-                                };
-                                if tx_clone.send(event).is_err()
-                                    || tx_clone
-                                        .send(CompareProgress::Progress(ProgressValue::with_size(
-                                            size,
-                                        )))
-                                        .is_err()
-                                {
-                                    log::error!("Send failed");
-                                }
-                            });
+                            self.compare_files(file1, file2, index, hashers_ref, &tx, scope);
                             index += 1;
                             cur1 = it1_rx.recv().ok();
                             cur2 = it2_rx.recv().ok();
@@ -251,6 +215,51 @@ impl DirectoryComparer {
         })?;
 
         Self::save_hashers(hashers)?;
+        Ok(())
+    }
+
+    fn compare_files<'a>(
+        &'a self,
+        file1: FileItem,
+        file2: FileItem,
+        index: usize,
+        hashers_ref: Option<&'a (FileHasher, FileHasher)>,
+        tx: &mpsc::Sender<CompareProgress>,
+        scope: &rayon::Scope<'a>,
+    ) {
+        let tx = tx.clone();
+        scope.spawn(move |_| {
+            if let Err(error) = self._compare_files(&file1, &file2, index, &hashers_ref, &tx) {
+                log::error!(
+                    "Error comparing '{}': {}",
+                    file1.relative_path(&self.dir1).display(),
+                    error
+                );
+                let _ = tx.send(CompareProgress::Error);
+            };
+        });
+    }
+
+    fn _compare_files(
+        &self,
+        file1: &FileItem,
+        file2: &FileItem,
+        index: usize,
+        hashers_ref: &Option<&(FileHasher, FileHasher)>,
+        tx: &mpsc::Sender<CompareProgress>,
+    ) -> anyhow::Result<()> {
+        let mut comparer = FileComparer::new(file1, file2);
+        comparer.buffer_size = self.buffer_size;
+        if let Some((h1, h2)) = hashers_ref {
+            comparer.hashers = Some((h1, h2));
+        }
+        let rel_path = file1.relative_path(&self.dir1);
+        let mut result = FileComparisonResult::new(rel_path.into(), Classification::InBoth);
+        let should_compare = self.comparison_method != FileComparisonMethod::Size;
+        result.update(&comparer, should_compare)?;
+        tx.send(CompareProgress::Result(index, result))?;
+        let size = file1.size();
+        tx.send(CompareProgress::Progress(ProgressValue::with_size(size)))?;
         Ok(())
     }
 
