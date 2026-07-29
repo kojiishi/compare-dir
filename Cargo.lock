@@ -690,9 +690,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "simple-path"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "237d87ae04fd6518d6ae04cf6abb4b711920887bbf14744a6f27cfb79dc77723"
+checksum = "9d431bee93d7e2e1f6724983089db3d255e7bbf251431ff1de58dcf59984f64d"
 dependencies = [
  "anyhow",
  "dunce",
