@@ -395,7 +395,7 @@ impl ComparisonSummary {
             ("Not comparable:", self.not_comparable),
             ("Errors:", self.num_errors),
         ];
-        let formatter = ColumnFormatter::new(values.iter().map(|(s, _)| *s));
+        let formatter = ColumnFormatter::with_strs(values.iter().map(|(s, _)| *s));
         formatter.write_value(&mut writer, "Left:", dir1_name)?;
         formatter.write_value(&mut writer, "Right:", dir2_name)?;
         formatter.write_value(

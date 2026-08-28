@@ -2,22 +2,29 @@ use std::borrow::Borrow;
 use std::fmt::Display;
 use std::io::{self, Write};
 
+use unicode_width_utils::UnicodeWidth;
+
 pub(crate) struct ColumnFormatter {
     width: usize,
 }
 
 impl ColumnFormatter {
-    pub fn new<I, S>(iter: I) -> Self
+    pub fn new(width: usize) -> Self {
+        Self { width }
+    }
+
+    pub fn with_strs<I, S>(iter: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
+        let uw = UnicodeWidth::new();
         let width = iter
             .into_iter()
-            .map(|s| s.as_ref().len())
+            .map(|s| uw.str(s.as_ref()))
             .max()
             .unwrap_or(0);
-        Self { width }
+        Self::new(width)
     }
 
     pub fn write_value<W, S, V>(&self, writer: &mut W, name: S, value: V) -> io::Result<()>
@@ -52,7 +59,7 @@ mod tests {
     #[test]
     fn column_formatter() -> anyhow::Result<()> {
         let labels = ["Short:", "VeryLongLabel:"];
-        let formatter = ColumnFormatter::new(labels);
+        let formatter = ColumnFormatter::with_strs(labels);
         assert_eq!(formatter.width, 14);
 
         let mut buf = Vec::new();
@@ -66,7 +73,7 @@ mod tests {
     #[test]
     fn write_values() -> anyhow::Result<()> {
         let values = [("A:", 1), ("Longer:", 2)];
-        let formatter = ColumnFormatter::new(values.iter().map(|(s, _)| *s));
+        let formatter = ColumnFormatter::with_strs(values.iter().map(|(s, _)| *s));
         let mut buf = Vec::new();
         formatter.write_values(&mut buf, values)?;
         let output = String::from_utf8(buf)?;

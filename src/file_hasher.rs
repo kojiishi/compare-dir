@@ -204,7 +204,7 @@ impl FileHasher {
             ("Modified files:", num_modified),
             ("Errors:", num_error),
         ];
-        let formatter = ColumnFormatter::new(summary.iter().map(|(s, _)| *s));
+        let formatter = ColumnFormatter::with_strs(summary.iter().map(|(s, _)| *s));
         let mut writer = std::io::stderr();
         formatter.write_value(
             &mut writer,
@@ -355,7 +355,7 @@ impl FileHasher {
             ("Hash computed:", num_hashed),
             ("Total wasted space:", total_wasted_space),
         ];
-        let formatter = ColumnFormatter::new(summary.iter().map(|(s, _)| *s));
+        let formatter = ColumnFormatter::with_strs(summary.iter().map(|(s, _)| *s));
         formatter.write_values(&mut io::stderr(), &summary)
     }
 
