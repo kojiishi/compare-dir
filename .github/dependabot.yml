@@ -20,6 +20,7 @@ updates:
         - "*"
       exclude:
         - "simple-path"
+        - "unicode-width-utils"
 
   - package-ecosystem: "github-actions"
     directory: "/"
